@@ -1,0 +1,1268 @@
+{
+  "generatedAt": "2026-04-06T02:15:21.409Z",
+  "total": 20,
+  "passed": 20,
+  "failed": 0,
+  "results": [
+    {
+      "articleId": 2142,
+      "language": "zh",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 4962
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 4962
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 595.71875,
+          "width": 832,
+          "height": 547
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1174.71875,
+          "width": 832,
+          "height": 3067
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 781,
+          "width": 352,
+          "height": 4088
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 28,
+        "bodyTextLength": 22,
+        "summaryAudit": {
+          "bodyHeight": 1136,
+          "headings": 4,
+          "paragraphs": 3,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 2940,
+          "headings": 6,
+          "paragraphs": 27,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2141,
+      "language": "zh",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 5915.71875
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5430
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 595.71875,
+          "width": 832,
+          "height": 347
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 974.71875,
+          "width": 832,
+          "height": 5160
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 1087,
+          "width": 352,
+          "height": 4250
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 23,
+        "bodyTextLength": 22,
+        "summaryAudit": {
+          "bodyHeight": 220,
+          "headings": 0,
+          "paragraphs": 2,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 5033,
+          "headings": 4,
+          "paragraphs": 33,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2139,
+      "language": "zh",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 5090
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5090
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 595.71875,
+          "width": 832,
+          "height": 347
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 974.71875,
+          "width": 832,
+          "height": 3674
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 781,
+          "width": 352,
+          "height": 4216
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 23,
+        "bodyTextLength": 22,
+        "summaryAudit": {
+          "bodyHeight": 220,
+          "headings": 0,
+          "paragraphs": 2,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 3547,
+          "headings": 4,
+          "paragraphs": 25,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2135,
+      "language": "zh",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 5446
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5446
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 595.71875,
+          "width": 832,
+          "height": 547
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1174.71875,
+          "width": 832,
+          "height": 3028
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 1087,
+          "width": 352,
+          "height": 4266
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 28,
+        "bodyTextLength": 22,
+        "summaryAudit": {
+          "bodyHeight": 1355,
+          "headings": 0,
+          "paragraphs": 10,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 2901,
+          "headings": 6,
+          "paragraphs": 23,
+          "strongs": 19,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2132,
+      "language": "zh",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 5572
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5572
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 595.71875,
+          "width": 832,
+          "height": 347
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 974.71875,
+          "width": 832,
+          "height": 4607
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 1285,
+          "width": 352,
+          "height": 4194
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 23,
+        "bodyTextLength": 22,
+        "summaryAudit": {
+          "bodyHeight": 220,
+          "headings": 0,
+          "paragraphs": 2,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 4480,
+          "headings": 3,
+          "paragraphs": 38,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2128,
+      "language": "zh",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 5564.71875
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 4965
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 595.71875,
+          "width": 832,
+          "height": 547
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1174.71875,
+          "width": 832,
+          "height": 4609
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 781,
+          "width": 352,
+          "height": 4091
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 28,
+        "bodyTextLength": 22,
+        "summaryAudit": {
+          "bodyHeight": 1549,
+          "headings": 8,
+          "paragraphs": 9,
+          "strongs": 3,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 4482,
+          "headings": 4,
+          "paragraphs": 35,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2124,
+      "language": "zh",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 7022.71875
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5096
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 595.71875,
+          "width": 832,
+          "height": 547
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1174.71875,
+          "width": 832,
+          "height": 6067
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 781,
+          "width": 352,
+          "height": 4222
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 28,
+        "bodyTextLength": 22,
+        "summaryAudit": {
+          "bodyHeight": 1116,
+          "headings": 0,
+          "paragraphs": 8,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 5940,
+          "headings": 5,
+          "paragraphs": 42,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2121,
+      "language": "zh",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 8030.71875
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 4354.5
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 691.71875,
+          "width": 832,
+          "height": 347
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1070.71875,
+          "width": 832,
+          "height": 7179
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 781,
+          "width": 352,
+          "height": 3480.5
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 23,
+        "bodyTextLength": 22,
+        "summaryAudit": {
+          "bodyHeight": 220,
+          "headings": 0,
+          "paragraphs": 2,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 7052,
+          "headings": 32,
+          "paragraphs": 54,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2119,
+      "language": "zh",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 6727.71875
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5533
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 595.71875,
+          "width": 832,
+          "height": 347
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 974.71875,
+          "width": 832,
+          "height": 5972
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 1087,
+          "width": 352,
+          "height": 4353
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 23,
+        "bodyTextLength": 22,
+        "summaryAudit": {
+          "bodyHeight": 220,
+          "headings": 0,
+          "paragraphs": 2,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 5845,
+          "headings": 9,
+          "paragraphs": 50,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2114,
+      "language": "zh",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 4432.5
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 4432.5
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 595.71875,
+          "width": 832,
+          "height": 653
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1280.71875,
+          "width": 832,
+          "height": 1320
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 781,
+          "width": 352,
+          "height": 3558.5
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 23,
+        "bodyTextLength": 22,
+        "summaryAudit": {
+          "bodyHeight": 526,
+          "headings": 1,
+          "paragraphs": 3,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 1193,
+          "headings": 7,
+          "paragraphs": 11,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2142,
+      "language": "en",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 5365.796875
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 1306
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 802.796875,
+          "width": 832,
+          "height": 618
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1452.796875,
+          "width": 832,
+          "height": 4132
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 905,
+          "width": 352,
+          "height": 280
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 139,
+        "bodyTextLength": 77,
+        "summaryAudit": {
+          "bodyHeight": 571,
+          "headings": 0,
+          "paragraphs": 4,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 4005,
+          "headings": 6,
+          "paragraphs": 28,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2141,
+      "language": "en",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 7650.71875
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5393
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 665.71875,
+          "width": 832,
+          "height": 618
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1315.71875,
+          "width": 832,
+          "height": 6554
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 1211,
+          "width": 352,
+          "height": 4061
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 139,
+        "bodyTextLength": 77,
+        "summaryAudit": {
+          "bodyHeight": 887,
+          "headings": 0,
+          "paragraphs": 7,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 6427,
+          "headings": 4,
+          "paragraphs": 26,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2139,
+      "language": "en",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 6084.078125
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5209
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 724.078125,
+          "width": 832,
+          "height": 618
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1374.078125,
+          "width": 832,
+          "height": 4929
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 905,
+          "width": 352,
+          "height": 4183
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 139,
+        "bodyTextLength": 77,
+        "summaryAudit": {
+          "bodyHeight": 722,
+          "headings": 0,
+          "paragraphs": 5,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 4802,
+          "headings": 4,
+          "paragraphs": 28,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2135,
+      "language": "en",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 6176.4375
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5568
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 814.4375,
+          "width": 832,
+          "height": 618
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1464.4375,
+          "width": 832,
+          "height": 4931
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 1211,
+          "width": 352,
+          "height": 4236
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 139,
+        "bodyTextLength": 77,
+        "summaryAudit": {
+          "bodyHeight": 524,
+          "headings": 0,
+          "paragraphs": 5,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 4804,
+          "headings": 7,
+          "paragraphs": 22,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2132,
+      "language": "en",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 6935.4375
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5669
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 750.4375,
+          "width": 832,
+          "height": 618
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1400.4375,
+          "width": 832,
+          "height": 5754
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 1409,
+          "width": 352,
+          "height": 4139
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 139,
+        "bodyTextLength": 77,
+        "summaryAudit": {
+          "bodyHeight": 1076,
+          "headings": 0,
+          "paragraphs": 9,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 5627,
+          "headings": 3,
+          "paragraphs": 34,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2128,
+      "language": "en",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 5983.078125
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5065
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 686.078125,
+          "width": 832,
+          "height": 618
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1336.078125,
+          "width": 832,
+          "height": 4866
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 905,
+          "width": 352,
+          "height": 4039
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 139,
+        "bodyTextLength": 77,
+        "summaryAudit": {
+          "bodyHeight": 712,
+          "headings": 0,
+          "paragraphs": 5,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 4739,
+          "headings": 3,
+          "paragraphs": 24,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2124,
+      "language": "en",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 9551.078125
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5115
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 686.078125,
+          "width": 832,
+          "height": 618
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1336.078125,
+          "width": 832,
+          "height": 8434
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 905,
+          "width": 352,
+          "height": 4089
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 139,
+        "bodyTextLength": 77,
+        "summaryAudit": {
+          "bodyHeight": 588,
+          "headings": 0,
+          "paragraphs": 5,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 8307,
+          "headings": 8,
+          "paragraphs": 41,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2121,
+      "language": "en",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 8043.71875
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 4510.5
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 691.71875,
+          "width": 832,
+          "height": 618
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1341.71875,
+          "width": 832,
+          "height": 6921
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 905,
+          "width": 352,
+          "height": 3484.5
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 139,
+        "bodyTextLength": 77,
+        "summaryAudit": {
+          "bodyHeight": 982,
+          "headings": 0,
+          "paragraphs": 7,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 6794,
+          "headings": 16,
+          "paragraphs": 41,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2119,
+      "language": "en",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 8351.71875
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 5515
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 665.71875,
+          "width": 832,
+          "height": 618
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1315.71875,
+          "width": 832,
+          "height": 7255
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 1211,
+          "width": 352,
+          "height": 4183
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 139,
+        "bodyTextLength": 77,
+        "summaryAudit": {
+          "bodyHeight": 703,
+          "headings": 0,
+          "paragraphs": 6,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 7128,
+          "headings": 5,
+          "paragraphs": 34,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    },
+    {
+      "articleId": 2114,
+      "language": "en",
+      "failures": [],
+      "audit": {
+        "fudanBlue": "#0d0783",
+        "fudanOrange": "#ea6b00",
+        "mainBox": {
+          "x": 112,
+          "y": 219,
+          "width": 832,
+          "height": 4507.5
+        },
+        "sidebarBox": {
+          "x": 976,
+          "y": 219,
+          "width": 352,
+          "height": 4507.5
+        },
+        "summaryBox": {
+          "x": 112,
+          "y": 686.078125,
+          "width": 832,
+          "height": 618
+        },
+        "bodyBox": {
+          "x": 112,
+          "y": 1336.078125,
+          "width": 832,
+          "height": 2139
+        },
+        "relatedBox": {
+          "x": 976,
+          "y": 905,
+          "width": 352,
+          "height": 3481.5
+        },
+        "relatedExists": true,
+        "sidebarOnRight": true,
+        "summaryVisible": true,
+        "bodyVisible": true,
+        "summaryTextLength": 139,
+        "bodyTextLength": 77,
+        "summaryAudit": {
+          "bodyHeight": 678,
+          "headings": 0,
+          "paragraphs": 4,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        },
+        "bodyAudit": {
+          "bodyHeight": 2012,
+          "headings": 4,
+          "paragraphs": 10,
+          "strongs": 0,
+          "tables": 0,
+          "hasRawMarkdownHeading": false,
+          "hasRawBulletFlood": false
+        }
+      }
+    }
+  ]
+}

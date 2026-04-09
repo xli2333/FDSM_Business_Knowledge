@@ -1,0 +1,83 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Serif+SC:wght@400;600;700;900&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-fudan-blue: #0d0783;
+  --color-fudan-orange: #ea6b00;
+  --color-fudan-dark: #0a0560;
+  --color-fudan-mist: #f5f4f0;
+  --color-fudan-paper: #fcfbf8;
+  --font-sans: "Inter", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-serif: "Noto Serif SC", "Songti SC", serif;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply m-0 min-h-screen font-sans text-slate-900 antialiased;
+    background:
+      radial-gradient(circle at top left, rgba(13, 7, 131, 0.08), transparent 28%),
+      radial-gradient(circle at bottom right, rgba(234, 107, 0, 0.08), transparent 24%),
+      linear-gradient(180deg, #fcfbf8 0%, #f7f5ef 100%);
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply font-serif text-fudan-blue;
+  }
+}
+
+@layer components {
+  .page-shell {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .section-title {
+    @apply font-serif text-3xl font-black tracking-tight text-fudan-blue md:text-4xl;
+  }
+
+  .section-kicker {
+    @apply mb-3 inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.25em] text-fudan-orange;
+  }
+
+  .fudan-panel {
+    @apply rounded-[2rem] border border-slate-200/70 bg-white/90 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur;
+  }
+
+  .fudan-card {
+    @apply rounded-[1.6rem] border border-slate-200/70 bg-white/95 shadow-[0_18px_60px_rgba(15,23,42,0.08)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_24px_70px_rgba(13,7,131,0.12)];
+  }
+
+  .paper-divider {
+    @apply border-t border-dashed border-slate-300/70;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.18);
+}

@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+
+LOCAL_AUDIO_ITEMS = [
+    {
+        "slug": "alibaba-latest-results",
+        "file_name": "2026-03-20T07-35-14-839Z_阿里的最新业绩分析.mp3",
+        "title": "阿里的最新业绩分析",
+        "summary": "围绕阿里最新业绩、增长结构和管理层后续动作，做一轮适合通勤收听的快速拆解。",
+        "speaker": "业绩拆解栏目",
+        "series_name": "财报速听",
+        "publish_date": "2026-03-20",
+        "duration_seconds": 525,
+        "body_markdown": "## 节目简介\n\n围绕阿里最新业绩、增长结构和管理层后续动作，做一轮适合通勤收听的快速拆解。",
+        "transcript_markdown": "阿里的最新业绩分析，重点围绕收入结构、增长质量与后续经营动作展开。",
+    },
+    {
+        "slug": "host-b-profit-for-future",
+        "file_name": "2026-03-20T11-59-18-376Z_Host_B_拿当下的利润去换未来_这赌注可太大了.mp3",
+        "title": "拿当下的利润去换未来，这赌注可太大了",
+        "summary": "聚焦企业用当期利润换长期空间的取舍，讨论重投入战略背后的风险、赔率与管理判断。",
+        "speaker": "Host B",
+        "series_name": "Host B 观点速听",
+        "publish_date": "2026-03-20",
+        "duration_seconds": 289,
+        "body_markdown": "## 节目简介\n\n聚焦企业用当期利润换长期空间的取舍，讨论重投入战略背后的风险、赔率与管理判断。",
+        "transcript_markdown": "这一期围绕利润换未来的经营抉择展开，讨论战略投入的边界与管理层的下注逻辑。",
+    },
+    {
+        "slug": "unitree-ipo-gross-margin",
+        "file_name": "2026-03-21T12-13-32-725Z_60_毛利背后的_大脑_焦虑_拆解宇树科技IPO招股书.mp3",
+        "title": "毛利背后的“大脑”焦虑，拆解宇树科技 IPO 招股书",
+        "summary": "从宇树科技招股书切入，梳理毛利变化、核心能力与扩张节奏之间的真实张力。",
+        "speaker": "IPO 观察栏目",
+        "series_name": "招股书拆解",
+        "publish_date": "2026-03-21",
+        "duration_seconds": 529,
+        "body_markdown": "## 节目简介\n\n从宇树科技招股书切入，梳理毛利变化、核心能力与扩张节奏之间的真实张力。",
+        "transcript_markdown": "本期以宇树科技 IPO 招股书为入口，重点讨论毛利变化、核心技术与扩张节奏的矛盾点。",
+    },
+    {
+        "slug": "robot-minting-machine-brain-deal",
+        "file_name": "2026-03-21T12-59-57-055Z_把机器人干成印钞机后_那个偏科生为什么要砸20亿买个_脑子.mp3",
+        "title": "把机器人干成印钞机后，那个偏科生为什么要砸 20 亿买个脑子",
+        "summary": "围绕机器人商业化后的下一步补链动作，讨论为什么资本会重金押注“脑子”而不是继续堆硬件。",
+        "speaker": "机器人商业化栏目",
+        "series_name": "机器人产业观察",
+        "publish_date": "2026-03-21",
+        "duration_seconds": 569,
+        "body_markdown": "## 节目简介\n\n围绕机器人商业化后的下一步补链动作，讨论为什么资本会重金押注“脑子”而不是继续堆硬件。",
+        "transcript_markdown": "这一期聚焦机器人商业化之后的能力补链，讨论资本为什么转向“脑子”而不是继续堆硬件。",
+    },
+]
