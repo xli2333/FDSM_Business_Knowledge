@@ -20,5 +20,6 @@
 ## 备注
 - 目标远端：`archive` -> `https://github.com/xli2333/FDSM_Business_Knowledge.git`
 - 留存分支：`archive_snapshot_20260413`
-- 留存提交：`2d757ccd7a9a95829b94c58b2b4262d2e2ee3e9e`
+- 主体快照提交：`80cb4b0d9e8d9ce2459262a4a17c326da2c9d63e`
+- 后续仅补充了 `round105` 勾选与备注，不影响主体代码快照留存。
 - 本轮采用新增分支留存，不覆盖目标仓库现有 `main`。
