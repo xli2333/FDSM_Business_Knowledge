@@ -454,10 +454,11 @@ class MediaChapter(BaseModel):
 
 class MediaItemSummary(BaseModel):
     id: int
+    media_item_id: int | None = None
     slug: str
     kind: str
-    title: str
-    summary: str
+    title: str = ""
+    summary: str = ""
     speaker: str | None = None
     series_name: str | None = None
     episode_number: int = 1
@@ -465,7 +466,9 @@ class MediaItemSummary(BaseModel):
     duration_seconds: int = 0
     visibility: str
     visibility_label: str
-    status: str = "published"
+    status: str = "draft"
+    workflow_status: str = "draft"
+    draft_box_state: str = "active"
     accessible: bool = False
     gate_copy: str | None = None
     cover_image_url: str | None = None
@@ -475,32 +478,47 @@ class MediaItemSummary(BaseModel):
     source_url: str | None = None
     transcript_excerpt: str | None = None
     chapter_count: int = 0
+    has_unpublished_changes: bool = False
+    is_reopened_from_published: bool = False
+    copy_model: str | None = None
+    copy_updated_at: str | None = None
+    manual_copy_updated_at: str | None = None
+    updated_at: str | None = None
+    published_at: str | None = None
 
 
 class MediaItemDetail(MediaItemSummary):
     transcript_markdown: str = ""
+    script_markdown: str = ""
     body_markdown: str = ""
     chapters: list[MediaChapter] = Field(default_factory=list)
+    published_summary: str | None = None
+    published_body_markdown: str | None = None
+    published_transcript_markdown: str | None = None
+    published_script_markdown: str | None = None
+    published_media_url: str | None = None
+    published_cover_image_url: str | None = None
+    published_chapters: list[MediaChapter] = Field(default_factory=list)
 
 
 class MediaItemCreate(BaseModel):
     slug: str | None = None
     kind: str
-    title: str
-    summary: str
+    title: str | None = None
+    summary: str | None = None
     speaker: str | None = None
     series_name: str | None = None
     episode_number: int = 1
-    publish_date: str
+    publish_date: str | None = None
     duration_seconds: int = 0
     visibility: str = "public"
     status: str = "draft"
     cover_image_url: str | None = None
     media_url: str | None = None
-    preview_url: str | None = None
     source_url: str | None = None
     body_markdown: str | None = None
     transcript_markdown: str | None = None
+    script_markdown: str | None = None
     chapters: list[MediaChapter] = Field(default_factory=list)
 
 
@@ -518,10 +536,10 @@ class MediaItemUpdate(BaseModel):
     status: str | None = None
     cover_image_url: str | None = None
     media_url: str | None = None
-    preview_url: str | None = None
     source_url: str | None = None
     body_markdown: str | None = None
     transcript_markdown: str | None = None
+    script_markdown: str | None = None
     chapters: list[MediaChapter] | None = None
 
 
@@ -537,6 +555,7 @@ class MediaUploadResponse(BaseModel):
     content_type: str | None = None
     size_bytes: int = 0
     url: str
+    item: MediaItemDetail | None = None
 
 
 class MediaHubResponse(BaseModel):
@@ -987,6 +1006,8 @@ class EditorialDeleteResponse(BaseModel):
 
 class EditorialUploadResponse(BaseModel):
     filename: str
+    usage: str = "source"
+    url: str | None = None
     article: EditorialArticleDetail
 
 

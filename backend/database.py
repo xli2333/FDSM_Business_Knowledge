@@ -296,6 +296,47 @@ def ensure_runtime_tables() -> None:
             CREATE INDEX IF NOT EXISTS idx_media_items_kind
             ON media_items(kind, status, publish_date DESC, sort_order ASC);
 
+            CREATE TABLE IF NOT EXISTS media_drafts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_item_id INTEGER REFERENCES media_items(id),
+                slug TEXT UNIQUE NOT NULL,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL,
+                summary TEXT NOT NULL DEFAULT '',
+                speaker TEXT,
+                series_name TEXT,
+                episode_number INTEGER NOT NULL DEFAULT 1,
+                publish_date TEXT NOT NULL,
+                duration_seconds INTEGER NOT NULL DEFAULT 0,
+                visibility TEXT NOT NULL DEFAULT 'public',
+                status TEXT NOT NULL DEFAULT 'draft',
+                draft_box_state TEXT NOT NULL DEFAULT 'active',
+                workflow_status TEXT NOT NULL DEFAULT 'draft',
+                cover_image_url TEXT,
+                media_url TEXT,
+                source_url TEXT,
+                body_markdown TEXT NOT NULL DEFAULT '',
+                transcript_markdown TEXT NOT NULL DEFAULT '',
+                script_markdown TEXT NOT NULL DEFAULT '',
+                chapter_payload_json TEXT NOT NULL DEFAULT '[]',
+                published_payload_json TEXT NOT NULL DEFAULT '{}',
+                copy_model TEXT,
+                copy_updated_at TEXT,
+                manual_copy_updated_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                published_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_media_drafts_status
+            ON media_drafts(status, updated_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_media_drafts_media_item_id
+            ON media_drafts(media_item_id);
+
+            CREATE INDEX IF NOT EXISTS idx_media_drafts_draft_box_state
+            ON media_drafts(draft_box_state, updated_at DESC);
+
             CREATE TABLE IF NOT EXISTS billing_plans (
                 plan_code TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
@@ -551,8 +592,64 @@ def ensure_runtime_tables() -> None:
             connection.execute("ALTER TABLE media_items ADD COLUMN preview_url TEXT")
         if not _table_has_column(connection, "media_items", "transcript_markdown"):
             connection.execute("ALTER TABLE media_items ADD COLUMN transcript_markdown TEXT NOT NULL DEFAULT ''")
+        if not _table_has_column(connection, "media_items", "script_markdown"):
+            connection.execute("ALTER TABLE media_items ADD COLUMN script_markdown TEXT NOT NULL DEFAULT ''")
         if not _table_has_column(connection, "media_items", "chapter_payload_json"):
             connection.execute("ALTER TABLE media_items ADD COLUMN chapter_payload_json TEXT NOT NULL DEFAULT '[]'")
+        if not _table_has_column(connection, "media_drafts", "media_item_id"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN media_item_id INTEGER REFERENCES media_items(id)")
+        if not _table_has_column(connection, "media_drafts", "summary"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN summary TEXT NOT NULL DEFAULT ''")
+        if not _table_has_column(connection, "media_drafts", "speaker"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN speaker TEXT")
+        if not _table_has_column(connection, "media_drafts", "series_name"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN series_name TEXT")
+        if not _table_has_column(connection, "media_drafts", "episode_number"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN episode_number INTEGER NOT NULL DEFAULT 1")
+        if not _table_has_column(connection, "media_drafts", "duration_seconds"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN duration_seconds INTEGER NOT NULL DEFAULT 0")
+        if not _table_has_column(connection, "media_drafts", "visibility"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN visibility TEXT NOT NULL DEFAULT 'public'")
+        if not _table_has_column(connection, "media_drafts", "draft_box_state"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN draft_box_state TEXT NOT NULL DEFAULT 'active'")
+        if not _table_has_column(connection, "media_drafts", "workflow_status"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN workflow_status TEXT NOT NULL DEFAULT 'draft'")
+        if not _table_has_column(connection, "media_drafts", "cover_image_url"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN cover_image_url TEXT")
+        if not _table_has_column(connection, "media_drafts", "media_url"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN media_url TEXT")
+        if not _table_has_column(connection, "media_drafts", "source_url"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN source_url TEXT")
+        if not _table_has_column(connection, "media_drafts", "body_markdown"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN body_markdown TEXT NOT NULL DEFAULT ''")
+        if not _table_has_column(connection, "media_drafts", "transcript_markdown"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN transcript_markdown TEXT NOT NULL DEFAULT ''")
+        if not _table_has_column(connection, "media_drafts", "script_markdown"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN script_markdown TEXT NOT NULL DEFAULT ''")
+        if not _table_has_column(connection, "media_drafts", "chapter_payload_json"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN chapter_payload_json TEXT NOT NULL DEFAULT '[]'")
+        if not _table_has_column(connection, "media_drafts", "published_payload_json"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN published_payload_json TEXT NOT NULL DEFAULT '{}'")
+        if not _table_has_column(connection, "media_drafts", "copy_model"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN copy_model TEXT")
+        if not _table_has_column(connection, "media_drafts", "copy_updated_at"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN copy_updated_at TEXT")
+        if not _table_has_column(connection, "media_drafts", "manual_copy_updated_at"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN manual_copy_updated_at TEXT")
+        if not _table_has_column(connection, "media_drafts", "published_at"):
+            connection.execute("ALTER TABLE media_drafts ADD COLUMN published_at TEXT")
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_media_drafts_media_item_id
+            ON media_drafts(media_item_id)
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_media_drafts_draft_box_state
+            ON media_drafts(draft_box_state, updated_at DESC)
+            """
+        )
         if not _table_has_column(connection, "business_users", "description"):
             connection.execute("ALTER TABLE business_users ADD COLUMN description TEXT")
         if not _table_has_column(connection, "article_ai_outputs", "translation_title_en"):
@@ -778,7 +875,107 @@ def ensure_runtime_tables() -> None:
                 episode_number = CASE WHEN episode_number IS NULL OR episode_number <= 0 THEN 1 ELSE episode_number END,
                 preview_url = COALESCE(preview_url, source_url),
                 transcript_markdown = COALESCE(transcript_markdown, ''),
+                script_markdown = COALESCE(script_markdown, ''),
                 chapter_payload_json = COALESCE(NULLIF(chapter_payload_json, ''), '[]')
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO media_drafts (
+                media_item_id,
+                slug,
+                kind,
+                title,
+                summary,
+                speaker,
+                series_name,
+                episode_number,
+                publish_date,
+                duration_seconds,
+                visibility,
+                status,
+                draft_box_state,
+                workflow_status,
+                cover_image_url,
+                media_url,
+                source_url,
+                body_markdown,
+                transcript_markdown,
+                script_markdown,
+                chapter_payload_json,
+                published_payload_json,
+                created_at,
+                updated_at,
+                published_at
+            )
+            SELECT
+                media_items.id,
+                media_items.slug,
+                media_items.kind,
+                media_items.title,
+                COALESCE(media_items.summary, ''),
+                media_items.speaker,
+                media_items.series_name,
+                CASE
+                    WHEN media_items.episode_number IS NULL OR media_items.episode_number <= 0 THEN 1
+                    ELSE media_items.episode_number
+                END,
+                media_items.publish_date,
+                COALESCE(media_items.duration_seconds, 0),
+                COALESCE(NULLIF(media_items.visibility, ''), 'public'),
+                'draft',
+                'active',
+                'draft',
+                media_items.cover_image_url,
+                media_items.media_url,
+                media_items.source_url,
+                COALESCE(media_items.body_markdown, ''),
+                COALESCE(media_items.transcript_markdown, ''),
+                COALESCE(media_items.script_markdown, ''),
+                COALESCE(NULLIF(media_items.chapter_payload_json, ''), '[]'),
+                '{}',
+                media_items.created_at,
+                media_items.updated_at,
+                NULL
+            FROM media_items
+            WHERE media_items.status = 'draft'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM media_drafts
+                  WHERE media_drafts.media_item_id = media_items.id
+              )
+            """
+        )
+        connection.execute(
+            """
+            UPDATE media_drafts
+            SET
+                summary = COALESCE(summary, ''),
+                series_name = COALESCE(NULLIF(series_name, ''), CASE
+                    WHEN kind = 'audio' THEN '管理者音频'
+                    ELSE '管理者视频'
+                END),
+                episode_number = CASE WHEN episode_number IS NULL OR episode_number <= 0 THEN 1 ELSE episode_number END,
+                duration_seconds = COALESCE(duration_seconds, 0),
+                visibility = COALESCE(NULLIF(visibility, ''), 'public'),
+                draft_box_state = COALESCE(NULLIF(draft_box_state, ''), 'active'),
+                workflow_status = CASE
+                    WHEN status = 'published' THEN 'published'
+                    ELSE COALESCE(NULLIF(workflow_status, ''), 'draft')
+                END,
+                body_markdown = COALESCE(body_markdown, ''),
+                transcript_markdown = COALESCE(transcript_markdown, ''),
+                script_markdown = COALESCE(script_markdown, ''),
+                chapter_payload_json = COALESCE(NULLIF(chapter_payload_json, ''), '[]'),
+                published_payload_json = COALESCE(NULLIF(published_payload_json, ''), '{}')
+            """
+        )
+        connection.execute(
+            """
+            UPDATE media_drafts
+            SET draft_box_state = 'archived'
+            WHERE status = 'published'
+              AND workflow_status = 'published'
             """
         )
 

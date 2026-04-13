@@ -150,6 +150,66 @@ def test_admin_can_upload_media_files(monkeypatch):
     assert (upload_root / "audio" / "media" / payload["filename"]).exists()
 
 
+def _prepare_editorial_upload_root(monkeypatch):
+    upload_root = Path("backend/tests/_tmp_editorial_uploads").resolve()
+    if upload_root.exists():
+        for path in sorted(upload_root.rglob("*"), reverse=True):
+            if path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                path.rmdir()
+    upload_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(editorial_service, "EDITORIAL_UPLOADS_DIR", upload_root)
+    return upload_root
+
+
+def test_admin_can_upload_editorial_cover_and_publish_to_article_cover(monkeypatch):
+    _allow_admin_access(monkeypatch)
+    upload_root = _prepare_editorial_upload_root(monkeypatch)
+
+    create_response = client.post(
+        "/api/editorial/articles",
+        json={
+            "title": "Editorial Cover Draft",
+            "source_markdown": "first paragraph\n\nsecond paragraph",
+            "content_markdown": "first paragraph\n\nsecond paragraph",
+            "primary_column_slug": "insights",
+            "primary_column_manual": True,
+            "tags": [{"name": "数据治理", "slug": "topic-data-governance", "category": "topic", "confidence": 0.92}],
+            "final_html": "<div><h1>Editorial Cover Draft</h1><p>Ready.</p></div>",
+        },
+    )
+    assert create_response.status_code == 200
+    editorial_id = create_response.json()["id"]
+
+    upload_response = client.post(
+        "/api/editorial/upload",
+        data={"usage": "cover", "editorial_id": str(editorial_id)},
+        files={"file": ("editorial-cover.png", b"\x89PNG\r\n\x1a\ncover", "image/png")},
+    )
+    assert upload_response.status_code == 200
+    payload = upload_response.json()
+
+    assert payload["usage"] == "cover"
+    assert payload["url"].startswith("/editorial-uploads/covers/")
+    assert payload["article"]["cover_image_url"] == payload["url"]
+    assert (upload_root / "covers" / payload["filename"]).exists()
+
+    publish_response = client.post(f"/api/editorial/articles/{editorial_id}/publish")
+    assert publish_response.status_code == 200
+    article_id = publish_response.json()["article_id"]
+
+    latest_response = client.get("/api/articles/latest?limit=20")
+    assert latest_response.status_code == 200
+    cards = latest_response.json()
+    card = next(item for item in cards if item["id"] == article_id)
+    assert card["cover_url"] == f"/api/article/{article_id}/cover"
+
+    cover_response = client.get(f"/api/article/{article_id}/cover", follow_redirects=False)
+    assert cover_response.status_code in {302, 307}
+    assert cover_response.headers["location"] == payload["url"]
+
+
 def test_autotag_keeps_admin_removed_tags_removed(monkeypatch):
     _allow_admin_access(monkeypatch)
     monkeypatch.setattr(
@@ -1173,3 +1233,201 @@ def test_reopen_non_editorial_article_creates_single_linked_editorial_draft(monk
     reopen_again = client.post(f'/api/editorial/source-articles/{article_id}/reopen-draft')
     assert reopen_again.status_code == 200
     assert reopen_again.json()['id'] == reopened['id']
+
+
+def _prepare_media_upload_root(monkeypatch):
+    upload_root = Path("backend/tests/_tmp_media_uploads").resolve()
+    if upload_root.exists():
+        for path in sorted(upload_root.rglob("*"), reverse=True):
+            if path.is_file():
+                path.unlink()
+            elif path.is_dir():
+                path.rmdir()
+    upload_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(media_service, "MEDIA_UPLOADS_DIR", upload_root)
+    monkeypatch.setattr(media_service, "LOCAL_AUDIO_ITEMS", [])
+    return upload_root
+
+
+def _publish_video_media_draft(monkeypatch, *, stem="launch-video", with_cover=False):
+    _allow_admin_access(monkeypatch)
+    upload_root = _prepare_media_upload_root(monkeypatch)
+    monkeypatch.setattr(
+        ai_service,
+        "generate_media_text_assets",
+        lambda **kwargs: {
+            "summary": "节目围绕音视频工作流对齐展开，说明上传、转录和发布如何贯通。",
+            "body_markdown": "## 节目简介\n\n节目从后台工作流切入，说明主媒体、转录和脚本如何驱动发布素材生成。\n\n同时点出草稿箱、回编和重新发布之间的关系。",
+            "model": "media-copy-test-model",
+        },
+    )
+
+    media_response = client.post(
+        "/api/media/admin/upload",
+        data={"kind": "video", "usage": "media"},
+        files={"file": (f"{stem}.mp4", b"\x00\x00\x00\x18ftypmp42", "video/mp4")},
+    )
+    assert media_response.status_code == 200
+    media_payload = media_response.json()
+    draft_id = media_payload["item"]["id"]
+
+    cover_payload = None
+    if with_cover:
+        cover_response = client.post(
+            "/api/media/admin/upload",
+            data={"kind": "video", "usage": "cover", "draft_id": str(draft_id)},
+            files={"file": (f"{stem}-cover.png", b"\x89PNG\r\n\x1a\ncover", "image/png")},
+        )
+        assert cover_response.status_code == 200
+        cover_payload = cover_response.json()
+
+    transcript_response = client.post(
+        "/api/media/admin/upload",
+        data={"kind": "video", "usage": "script", "draft_id": str(draft_id)},
+        files={
+            "file": (
+                f"{stem}.md",
+                "# 转录\n\n00:00 开场说明\n\n00:42 进入工作流拆解\n\n01:26 结尾回到发布和回编",
+                "text/markdown",
+            )
+        },
+    )
+    assert transcript_response.status_code == 200
+
+    generated_response = client.post(f"/api/media/admin/items/{draft_id}/generate-copy")
+    assert generated_response.status_code == 200
+    generated = generated_response.json()
+
+    publish_response = client.post(f"/api/media/admin/items/{draft_id}/publish")
+    assert publish_response.status_code == 200
+    published = publish_response.json()
+    return {
+        "upload_root": upload_root,
+        "draft_id": draft_id,
+        "media_upload": media_payload,
+        "cover_upload": cover_payload,
+        "generated": generated,
+        "published": published,
+    }
+
+
+def test_media_script_upload_creates_draft_and_parses_text(monkeypatch):
+    _allow_admin_access(monkeypatch)
+    upload_root = _prepare_media_upload_root(monkeypatch)
+
+    response = client.post(
+        "/api/media/admin/upload",
+        data={"kind": "audio", "usage": "transcript"},
+        files={
+            "file": (
+                "founder-brief.md",
+                "## 节目脚本\n\n围绕创始人决策复盘展开。\n\n00:00 开场\n\n00:48 进入案例。",
+                "text/markdown",
+            )
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["usage"] == "transcript"
+    assert payload["item"]["id"] > 0
+    assert "创始人决策复盘" in payload["item"]["transcript_markdown"]
+    assert payload["item"]["draft_box_state"] == "active"
+    assert (upload_root / "audio" / "transcript" / payload["filename"]).exists()
+
+
+def test_media_draft_workflow_generates_copy_publishes_and_leaves_draft_box(monkeypatch):
+    workflow = _publish_video_media_draft(monkeypatch, stem="video-workflow")
+    generated = workflow["generated"]
+    published = workflow["published"]
+    upload_root = workflow["upload_root"]
+
+    assert generated["copy_model"] == "media-copy-test-model"
+    assert generated["summary"].startswith("节目围绕音视频工作流对齐展开")
+    assert generated["body_markdown"].startswith("## 节目简介")
+    assert len(generated["chapters"]) >= 2
+
+    assert published["status"] == "published"
+    assert published["workflow_status"] == "published"
+    assert published["draft_box_state"] == "archived"
+    assert published["media_item_id"] is not None
+    assert published["published_summary"] == generated["summary"]
+    assert published["published_body_markdown"] == generated["body_markdown"]
+    assert (upload_root / "video" / "media" / workflow["media_upload"]["filename"]).exists()
+
+    active_response = client.get("/api/media/admin/items")
+    assert active_response.status_code == 200
+    active_ids = {item["id"] for item in active_response.json()["items"]}
+    assert workflow["draft_id"] not in active_ids
+
+    deleted_detail_response = client.get(f"/api/media/admin/items/{workflow['draft_id']}")
+    assert deleted_detail_response.status_code == 404
+
+    source_response = client.get("/api/media/admin/source-items?kind=video&query=video%20workflow")
+    assert source_response.status_code == 200
+    source_items = source_response.json()["items"]
+    assert published["media_item_id"] in {item["id"] for item in source_items}
+
+
+def test_media_cover_upload_persists_into_published_item(monkeypatch):
+    workflow = _publish_video_media_draft(monkeypatch, stem="video-cover-workflow", with_cover=True)
+    published = workflow["published"]
+    upload_root = workflow["upload_root"]
+    cover_upload = workflow["cover_upload"]
+
+    assert cover_upload is not None
+    assert cover_upload["usage"] == "cover"
+    assert cover_upload["url"].startswith("/media-uploads/video/cover/")
+    assert published["cover_image_url"] == cover_upload["url"]
+    assert (upload_root / "video" / "cover" / cover_upload["filename"]).exists()
+
+    source_response = client.get("/api/media/video?limit=20")
+    assert source_response.status_code == 200
+    items = source_response.json()["items"]
+    item = next(entry for entry in items if entry["media_item_id"] == published["media_item_id"])
+    assert item["cover_image_url"] == cover_upload["url"]
+
+
+def test_media_reopen_reuses_existing_draft(monkeypatch):
+    workflow = _publish_video_media_draft(monkeypatch, stem="reopen-video")
+    published = workflow["published"]
+
+    first_reopen = client.post(f"/api/media/admin/source-items/{published['media_item_id']}/reopen-draft")
+    assert first_reopen.status_code == 200
+    reopened = first_reopen.json()
+
+    assert reopened["media_item_id"] == published["media_item_id"]
+    assert reopened["status"] == "draft"
+    assert reopened["workflow_status"] == "draft"
+    assert reopened["draft_box_state"] == "active"
+    assert reopened["is_reopened_from_published"] is True
+
+    second_reopen = client.post(f"/api/media/admin/source-items/{published['media_item_id']}/reopen-draft")
+    assert second_reopen.status_code == 200
+    assert second_reopen.json()["id"] == reopened["id"]
+
+    active_response = client.get("/api/media/admin/items?kind=video")
+    assert active_response.status_code == 200
+    active_ids = {item["id"] for item in active_response.json()["items"]}
+    assert reopened["id"] in active_ids
+
+
+def test_deleting_reopened_media_draft_keeps_published_media_item(monkeypatch):
+    workflow = _publish_video_media_draft(monkeypatch, stem="delete-reopened-video")
+    published = workflow["published"]
+
+    reopen_response = client.post(f"/api/media/admin/source-items/{published['media_item_id']}/reopen-draft")
+    assert reopen_response.status_code == 200
+    reopened = reopen_response.json()
+
+    delete_response = client.delete(f"/api/media/admin/items/{reopened['id']}")
+    assert delete_response.status_code == 200
+    assert delete_response.json()["deleted"] is True
+
+    draft_response = client.get("/api/media/admin/items?kind=video&limit=40")
+    assert draft_response.status_code == 200
+    assert reopened["id"] not in {item["id"] for item in draft_response.json()["items"]}
+
+    source_response = client.get("/api/media/admin/source-items?kind=video&limit=40")
+    assert source_response.status_code == 200
+    assert published["media_item_id"] in {item["id"] for item in source_response.json()["items"]}

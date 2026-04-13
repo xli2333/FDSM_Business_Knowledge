@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from backend.config import ALLOWED_ORIGINS, APP_TITLE, MEDIA_UPLOADS_DIR
+from backend.config import ALLOWED_ORIGINS, APP_TITLE, EDITORIAL_UPLOADS_DIR, MEDIA_UPLOADS_DIR
 from backend.database import ensure_database_ready
 from backend.routers.analytics import router as analytics_router
 from backend.routers.admin import router as admin_router
@@ -34,6 +34,7 @@ from backend.services.media_service import sync_local_audio_library
 
 ensure_database_ready()
 ensure_runtime_tables()
+EDITORIAL_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 MEDIA_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 sync_local_audio_library()
 
@@ -49,6 +50,7 @@ app.add_middleware(
 )
 
 app.mount("/audio-files", StaticFiles(directory=audio_directory, check_dir=False), name="audio-files")
+app.mount("/editorial-uploads", StaticFiles(directory=EDITORIAL_UPLOADS_DIR, check_dir=False), name="editorial-uploads")
 app.mount("/media-uploads", StaticFiles(directory=MEDIA_UPLOADS_DIR, check_dir=False), name="media-uploads")
 
 app.include_router(home_router)

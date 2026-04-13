@@ -15,6 +15,7 @@ FAISS_DB_DIR = DATA_DIR / "faiss_index_business"
 LEGACY_ARCHIVE_DIR = DATA_DIR / "archive" / "legacy_pre_knowledge_base"
 LEGACY_FAISS_DB_DIR = LEGACY_ARCHIVE_DIR / "indexes" / "faiss_index"
 UPLOADS_DIR = DATA_DIR / "uploads"
+EDITORIAL_UPLOADS_DIR = UPLOADS_DIR / "editorial"
 MEDIA_UPLOADS_DIR = UPLOADS_DIR / "media"
 GEMINI_AGGREGATE_PATH = (
     BUSINESS_DATA_DIR / "gemini_flash_batch" / "output" / "aggregate" / "all_documents.json"

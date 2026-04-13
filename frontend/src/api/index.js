@@ -209,8 +209,10 @@ export function autoSummarizeEditorialArticle(id) {
   })
 }
 
-export function uploadEditorialFile(file) {
+export function uploadEditorialFile(file, options = {}) {
   const formData = new FormData()
+  formData.append('usage', options?.usage || 'source')
+  if (options?.editorialId) formData.append('editorial_id', String(options.editorialId))
   formData.append('file', file)
   return request('/editorial/upload', {
     method: 'POST',
@@ -417,10 +419,22 @@ export function fetchMediaHub(kind, authToken = '', limit = 24) {
   })
 }
 
-export function fetchMediaAdminItems(kind = '', status = '', limit = 60) {
-  const kindSuffix = kind ? `&kind=${encodeURIComponent(kind)}` : ''
-  const statusSuffix = status ? `&status=${encodeURIComponent(status)}` : ''
-  return request(`/media/admin/items?limit=${limit}${kindSuffix}${statusSuffix}`)
+export function fetchMediaAdminItems(kind = '', status = '', limit = 60, workflowStatus = '', draftBoxState = 'active') {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  if (kind) params.set('kind', kind)
+  if (status) params.set('status', status)
+  if (workflowStatus) params.set('workflow_status', workflowStatus)
+  if (draftBoxState) params.set('draft_box_state', draftBoxState)
+  return request(`/media/admin/items?${params.toString()}`)
+}
+
+export function fetchMediaAdminSourceItems(kind = '', query = '', limit = 24) {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  if (kind) params.set('kind', kind)
+  if (query) params.set('query', query)
+  return request(`/media/admin/source-items?${params.toString()}`)
 }
 
 export function fetchMediaAdminItem(id) {
@@ -441,10 +455,38 @@ export function updateMediaAdminItem(id, payload) {
   })
 }
 
-export function uploadMediaAdminFile(file, kind, usage = 'media') {
+export function deleteMediaAdminItem(id) {
+  return request(`/media/admin/items/${id}`, {
+    method: 'DELETE',
+  })
+}
+
+export function generateMediaAdminCopy(id) {
+  return request(`/media/admin/items/${id}/generate-copy`, {
+    method: 'POST',
+  })
+}
+
+export function publishMediaAdminItem(id) {
+  return request(`/media/admin/items/${id}/publish`, {
+    method: 'POST',
+  })
+}
+
+export function reopenMediaAdminSourceItem(mediaItemId) {
+  return request(`/media/admin/source-items/${mediaItemId}/reopen-draft`, {
+    method: 'POST',
+  })
+}
+
+export function uploadMediaAdminFile(file, kind, usage = 'media', options = {}) {
   const formData = new FormData()
   formData.append('kind', kind)
   formData.append('usage', usage)
+  if (options?.draftId) formData.append('draft_id', String(options.draftId))
+  if (Number.isFinite(options?.durationSeconds) && Number(options.durationSeconds) > 0) {
+    formData.append('duration_seconds', String(Math.max(0, Math.round(Number(options.durationSeconds)))))
+  }
   formData.append('file', file)
   return request('/media/admin/upload', {
     method: 'POST',

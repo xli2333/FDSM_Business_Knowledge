@@ -13,6 +13,7 @@ import {
   fetchEditorialDashboard,
   fetchEditorialTopics,
   publishEditorialArticle,
+  resolveApiUrl,
   updateEditorialArticle,
   uploadEditorialFile,
 } from '../api/index.js'
@@ -209,6 +210,7 @@ function TagChip({ tag, removable = false, onRemove }) {
 function EditorialWorkbenchPage() {
   const { isEnglish } = useLanguage()
   const fileRef = useRef(null)
+  const coverFileRef = useRef(null)
   const hasInitializedRef = useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const [articles, setArticles] = useState([])
@@ -241,6 +243,7 @@ function EditorialWorkbenchPage() {
   const hasUnsavedSummaryEdits = Boolean(summaryEditorState?.dirty && String(summaryEditorState?.html || '').trim())
   const hasUnsavedManualEdits = Boolean(editorState?.dirty && String(editorState?.html || '').trim())
   const canDeleteSelectedDraft = canDeleteDraftEntry(detail)
+  const coverUrl = resolveApiUrl(form.cover_image_url)
 
   const syncDetail = useCallback(async (id) => {
     const article = await fetchEditorialArticle(id)
@@ -343,6 +346,31 @@ function EditorialWorkbenchPage() {
     return selectedId ? updateEditorialArticle(selectedId, payload) : createEditorialArticle(payload)
   }, [detail, editorState, form, isEnglish, selectedId, summaryEditorState])
 
+  const ensureDraftForCover = useCallback(async () => {
+    const payload = buildPersistPayload(
+      form,
+      detail,
+      isEnglish,
+      hasUnsavedManualEdits ? editorState : null,
+      hasUnsavedSummaryEdits ? summaryEditorState : null,
+    )
+    if (!String(payload.source_markdown || '').trim() && !String(payload.content_markdown || '').trim()) {
+      const placeholder = isEnglish ? 'Cover image placeholder.' : '配图占位稿。'
+      payload.source_markdown = placeholder
+      payload.content_markdown = placeholder
+    }
+    return selectedId ? updateEditorialArticle(selectedId, payload) : createEditorialArticle(payload)
+  }, [
+    detail,
+    editorState,
+    form,
+    hasUnsavedManualEdits,
+    hasUnsavedSummaryEdits,
+    isEnglish,
+    selectedId,
+    summaryEditorState,
+  ])
+
   const run = useCallback(
     async (key, task) => {
       setBusy(key)
@@ -357,6 +385,42 @@ function EditorialWorkbenchPage() {
       }
     },
     [isEnglish],
+  )
+
+  const handleCoverFile = useCallback(
+    (file, sourceLabel) =>
+      run('cover-upload', async () => {
+        if (!file) return
+        const saved = await ensureDraftForCover()
+        const payload = await uploadEditorialFile(file, {
+          usage: 'cover',
+          editorialId: saved.id,
+        })
+        await refreshAll(payload.article.id)
+        setMessage(
+          sourceLabel === 'paste'
+            ? isEnglish
+              ? 'Cover image pasted into the draft.'
+              : '配图已通过粘贴写入草稿。'
+            : isEnglish
+              ? `Cover image uploaded: ${payload.filename}`
+              : `配图已上传：${payload.filename}`,
+        )
+      }),
+    [ensureDraftForCover, isEnglish, refreshAll, run],
+  )
+
+  const handleCoverPaste = useCallback(
+    (event) => {
+      const items = Array.from(event.clipboardData?.items || [])
+      const imageItem = items.find((item) => String(item.type || '').startsWith('image/'))
+      if (!imageItem) return
+      const file = imageItem.getAsFile()
+      if (!file) return
+      event.preventDefault()
+      handleCoverFile(file, 'paste')
+    },
+    [handleCoverFile],
   )
 
   const handleSaveDraft = useCallback(
@@ -532,6 +596,17 @@ function EditorialWorkbenchPage() {
                   })
                 }
               />
+              <input
+                ref={coverFileRef}
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,.gif,.bmp,.avif,image/png,image/jpeg,image/webp,image/gif,image/bmp,image/avif"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0]
+                  event.target.value = ''
+                  handleCoverFile(file, 'upload')
+                }}
+              />
             </div>
           </div>
           <div className="grid gap-4 self-start md:grid-cols-3 lg:grid-cols-1">
@@ -693,6 +768,59 @@ function EditorialWorkbenchPage() {
                 placeholder={isEnglish ? 'Optional formatting notes for AI layout' : '给 AI 自动排版的补充说明，可留空'}
                 className="rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-7 outline-none xl:col-span-4"
               />
+            </div>
+
+            <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="rounded-[1.3rem] border border-slate-200 bg-slate-50 p-4">
+                <div className="mb-3 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  {isEnglish ? 'Cover preview' : '配图预览'}
+                </div>
+                {coverUrl ? (
+                  <img
+                    src={coverUrl}
+                    alt={isEnglish ? 'Article cover preview' : '文章配图预览'}
+                    className="max-h-[320px] w-full rounded-[1rem] object-cover"
+                  />
+                ) : (
+                  <div className="rounded-[1rem] border border-dashed border-slate-300 px-5 py-8 text-sm leading-7 text-slate-500">
+                    {isEnglish ? 'No article cover image yet.' : '当前还没有文章配图。'}
+                  </div>
+                )}
+              </div>
+              <div className="space-y-4">
+                <button
+                  type="button"
+                  onClick={() => coverFileRef.current?.click()}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-[1.2rem] border border-fudan-blue/20 bg-fudan-blue/5 px-4 py-4 text-sm font-semibold text-fudan-blue transition hover:bg-fudan-blue/10"
+                >
+                  {busy === 'cover-upload' ? <LoaderCircle size={16} className="animate-spin" /> : <FileUp size={16} />}
+                  {isEnglish ? 'Upload cover image' : '上传配图'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm((current) => ({ ...current, cover_image_url: '' }))}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-[1.2rem] border border-slate-200 bg-white px-4 py-4 text-sm font-semibold text-slate-600 transition hover:border-red-200 hover:text-red-500"
+                >
+                  <X size={16} />
+                  {isEnglish ? 'Clear cover image' : '清空配图'}
+                </button>
+                <div
+                  data-testid="editorial-cover-paste-zone"
+                  tabIndex={0}
+                  onClick={(event) => event.currentTarget.focus()}
+                  onPaste={handleCoverPaste}
+                  className="rounded-[1.2rem] border border-dashed border-emerald-300 bg-emerald-50 px-4 py-5 text-sm leading-7 text-emerald-700 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+                >
+                  {isEnglish
+                    ? 'Click here and paste an image from your clipboard to replace the current article cover.'
+                    : '点击这里后直接粘贴图片，即可把剪贴板里的图片设为当前文章配图。'}
+                </div>
+                <div className="rounded-[1.2rem] border border-slate-200 bg-white px-4 py-4 text-xs leading-6 text-slate-500">
+                  {isEnglish
+                    ? 'The uploaded cover will stay in the draft, and after publishing it will continue into the live article card and cover chain.'
+                    : '上传后的配图会先保留在草稿里，发布后继续进入正式文章卡片与封面链路。'}
+                </div>
+              </div>
             </div>
           </section>
 

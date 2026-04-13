@@ -671,7 +671,7 @@ def increment_article_view_count(article_id: int) -> None:
         connection.commit()
 
 
-def get_article_cover_path(article_id: int) -> Path:
+def get_article_cover_source(article_id: int) -> str:
     with connection_scope() as connection:
         row = connection.execute(
             "SELECT cover_image_path FROM articles WHERE id = ?",
@@ -679,7 +679,14 @@ def get_article_cover_path(article_id: int) -> Path:
         ).fetchone()
     if row is None or not row["cover_image_path"]:
         raise HTTPException(status_code=404, detail="Cover not found")
-    cover_path = (BUSINESS_DATA_DIR / row["cover_image_path"]).resolve()
+    return str(row["cover_image_path"]).strip()
+
+
+def get_article_cover_path(article_id: int) -> Path:
+    raw_cover_path = get_article_cover_source(article_id)
+    if raw_cover_path.startswith(("http://", "https://", "/")):
+        raise HTTPException(status_code=400, detail="Cover is stored as URL")
+    cover_path = (BUSINESS_DATA_DIR / raw_cover_path).resolve()
     if not str(cover_path).startswith(str(BUSINESS_DATA_DIR.resolve())):
         raise HTTPException(status_code=400, detail="Invalid cover path")
     if not cover_path.exists():

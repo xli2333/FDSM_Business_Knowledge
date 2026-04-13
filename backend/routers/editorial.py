@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 
 from backend.models.schemas import (
     AdminContentEntity,
@@ -38,6 +38,7 @@ from backend.services.editorial_service import (
     publish_editorial_article,
     reopen_published_article_to_editorial_draft_box,
     render_editorial_html,
+    upload_editorial_cover_image,
     update_editorial_workflow,
     update_editorial_article,
 )
@@ -153,16 +154,31 @@ def editorial_article_create(
 
 @router.post("/upload", response_model=EditorialUploadResponse)
 async def editorial_upload(
+    usage: str = Form("source"),
+    editorial_id: int | None = Form(default=None),
     file: UploadFile = File(...),
     authorization: str | None = Header(default=None),
     x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
     x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
 ):
     _require_editorial_admin(authorization, x_debug_user_id, x_debug_user_email)
+    if usage == "cover":
+        if editorial_id is None:
+            raise HTTPException(status_code=400, detail="Editorial draft id is required for cover uploads")
+        return await upload_editorial_cover_image(
+            editorial_id=editorial_id,
+            upload_file=file,
+            filename=file.filename or "cover-image.bin",
+            content_type=file.content_type,
+        )
+    if usage != "source":
+        raise HTTPException(status_code=400, detail="Unsupported editorial upload usage")
     content = await file.read()
     article = create_editorial_from_upload(file.filename or "uploaded.md", content)
     return {
         "filename": file.filename or "uploaded.md",
+        "usage": "source",
+        "url": None,
         "article": article,
     }
 

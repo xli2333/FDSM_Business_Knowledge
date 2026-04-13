@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
 from backend.models.schemas import (
     ArticleCard,
@@ -11,6 +11,7 @@ from backend.models.schemas import (
     ReactionRequest,
 )
 from backend.services.catalog_service import (
+    get_article_cover_source,
     get_article_cover_path,
     get_article_detail,
     list_articles,
@@ -63,6 +64,9 @@ def read_article(
 
 @router.get("/article/{article_id}/cover")
 def read_article_cover(article_id: int):
+    cover_source = get_article_cover_source(article_id)
+    if cover_source.startswith(("http://", "https://", "/")):
+        return RedirectResponse(cover_source)
     return FileResponse(get_article_cover_path(article_id))
 
 

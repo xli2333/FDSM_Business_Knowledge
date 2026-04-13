@@ -19,6 +19,7 @@ from backend.config import (
     PRIMARY_GEMINI_KEY,
     resolve_gemini_model_name,
 )
+from backend.services.html_renderer import strip_markdown
 
 _GEMINI_TIMEOUT = (10, 90)
 _GEMINI_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
@@ -666,6 +667,116 @@ def summarize_article_payload(title: str, content: str) -> dict[str, str]:
 
 def summarize_article(title: str, content: str) -> str:
     return summarize_article_payload(title, content)["summary"]
+
+
+def _compact_media_copy_text(value: str | None) -> str:
+    normalized = strip_markdown(str(value or "").replace("\r\n", "\n").replace("\r", "\n"))
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _truncate_media_copy_text(value: str, *, max_chars: int) -> str:
+    compact = _compact_media_copy_text(value)
+    if not compact:
+        return ""
+    if len(compact) <= max_chars:
+        return compact
+    clipped = compact[:max_chars].rstrip("，。；：:、 ")
+    if clipped and not re.search(r"[。！？!?]$", clipped):
+        clipped = f"{clipped}。"
+    return clipped
+
+
+def _build_media_body_fallback(summary: str, source_text: str) -> str:
+    source_compact = _compact_media_copy_text(source_text)
+    intro = _truncate_media_copy_text(summary or source_compact, max_chars=150)
+    remainder = source_compact[len(intro) :].strip() if intro and source_compact.startswith(intro.rstrip("。")) else source_compact
+    supporting = _truncate_media_copy_text(remainder, max_chars=180) if remainder else ""
+    parts = ["## 节目简介", ""]
+    if intro:
+        parts.append(intro)
+    if supporting and supporting != intro:
+        parts.extend(["", supporting])
+    return "\n".join(parts).strip()
+
+
+def generate_media_text_assets(
+    *,
+    title: str,
+    kind: str,
+    speaker: str,
+    series_name: str,
+    transcript_markdown: str,
+    script_markdown: str,
+) -> dict[str, str]:
+    source_text = str(script_markdown or transcript_markdown or "").strip()
+    if not source_text:
+        raise RuntimeError("Media copy source is empty.")
+
+    plain_source = _compact_media_copy_text(source_text)
+    fallback_summary = _truncate_media_copy_text(plain_source or title, max_chars=160)
+    fallback_body = _build_media_body_fallback(fallback_summary or title, plain_source or title)
+    if not is_ai_enabled():
+        return {
+            "summary": fallback_summary or title,
+            "body_markdown": fallback_body,
+            "model": "extractive-fallback",
+        }
+
+    source_window = _build_editorial_content_window(source_text, max_chars=16000, tail_chars=3000)
+    prompt = (
+        "You are helping a Chinese business knowledge media CMS produce copy for an audio or video program.\n"
+        "Return strict JSON only with this shape:\n"
+        "{\n"
+        '  "summary": "80-180 Chinese characters, one compact paragraph",\n'
+        '  "body_markdown": "Markdown only, start with ## 节目简介, then 1 or 2 short paragraphs"\n'
+        "}\n"
+        "Hard requirements:\n"
+        "1. Keep the same language as the source.\n"
+        "2. Do not invent facts beyond the transcript or script.\n"
+        "3. Do not add prefatory phrases such as 以下是、下面是、节目简介如下、本文、这期节目将.\n"
+        "4. Do not output bullet lists, numbered lists, titles outside the required ## 节目简介 heading, or marketing slogans.\n"
+        "5. The summary must be concise and directly usable as the media card summary.\n"
+        "6. The body_markdown must read like a finished program intro, not a note to the editor.\n\n"
+        f"Title: {title.strip() or '未命名节目'}\n"
+        f"Kind: {kind.strip() or 'audio'}\n"
+        f"Speaker: {speaker.strip() or 'None'}\n"
+        f"Series: {series_name.strip() or 'None'}\n\n"
+        f"Source:\n{source_window}\n\nJSON:"
+    )
+    try:
+        raw = _request_gemini_text(
+            prompt=prompt,
+            model_name=GEMINI_CHAT_MODEL,
+            response_mime_type="application/json",
+        )
+        payload = _parse_json_payload(raw)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Media copy payload must be a JSON object.")
+        summary = _truncate_media_copy_text(str(payload.get("summary") or fallback_summary), max_chars=180) or fallback_summary or title
+        body_markdown = str(payload.get("body_markdown") or "").strip()
+        if not body_markdown:
+            body_markdown = fallback_body
+        body_markdown = re.sub(r"^(?:#\s+.*\n+)+", "", body_markdown).strip()
+        if not body_markdown.startswith("## 节目简介"):
+            body_markdown = f"## 节目简介\n\n{_truncate_media_copy_text(body_markdown or summary, max_chars=320)}"
+        body_markdown = re.sub(
+            r"^(?:以下是|下面是|节目简介如下|本文|这期节目将).{0,40}?(?:[:：])?\s*",
+            "",
+            body_markdown,
+            flags=re.I,
+        ).strip()
+        return {
+            "summary": summary,
+            "body_markdown": body_markdown,
+            "model": GEMINI_CHAT_MODEL,
+        }
+    except Exception:
+        return {
+            "summary": fallback_summary or title,
+            "body_markdown": fallback_body,
+            "model": "extractive-fallback",
+        }
 
 
 def answer_with_sources(question: str, history: str, context_blocks: str, response_language: str = "auto") -> str:

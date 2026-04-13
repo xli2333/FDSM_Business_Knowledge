@@ -2,19 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import html
-import io
 import json
 import re
-import zipfile
 from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
-from xml.etree import ElementTree as ET
+from urllib.parse import quote
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 
-from backend.config import COLUMN_DEFINITIONS
+from backend.config import COLUMN_DEFINITIONS, EDITORIAL_UPLOADS_DIR
 from backend.database import connection_scope, ensure_runtime_tables
 from backend.services.article_ai_output_service import (
     build_current_article_source_hash,
@@ -35,6 +33,8 @@ from backend.services.membership_service import access_level_label, normalize_ac
 from backend.services.rag_engine import refresh_search_cache
 from backend.services.summary_preview_service import is_summary_preview_html, render_summary_preview_html
 from backend.services.tag_engine import _derive_tag_entries, _ensure_tag
+from backend.services.image_upload_service import save_image_upload
+from backend.services.upload_text_service import extract_upload_content
 from backend.scripts.build_business_db import COLOR_BY_CATEGORY, slugify
 
 ensure_runtime_tables()
@@ -825,70 +825,8 @@ def _repair_legacy_editorial_html_if_needed(connection, row):
     return _fetch_editorial_row(connection, int(current["id"]))
 
 
-def _decode_text_bytes(raw_bytes: bytes) -> str:
-    for encoding in ("utf-8-sig", "utf-8", "gb18030", "utf-16"):
-        try:
-            return raw_bytes.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return raw_bytes.decode("utf-8", errors="replace")
-
-
-def _html_to_markdown_like(content: str) -> str:
-    text = content.replace("\r\n", "\n")
-    text = re.sub(r"<\s*br\s*/?>", "\n", text, flags=re.I)
-    text = re.sub(r"<\s*/p\s*>", "\n\n", text, flags=re.I)
-    text = re.sub(r"<\s*h1[^>]*>(.*?)<\s*/h1\s*>", lambda m: f"# {re.sub(r'<[^>]+>', '', m.group(1)).strip()}\n\n", text, flags=re.I | re.S)
-    text = re.sub(r"<\s*h2[^>]*>(.*?)<\s*/h2\s*>", lambda m: f"## {re.sub(r'<[^>]+>', '', m.group(1)).strip()}\n\n", text, flags=re.I | re.S)
-    text = re.sub(r"<\s*h3[^>]*>(.*?)<\s*/h3\s*>", lambda m: f"### {re.sub(r'<[^>]+>', '', m.group(1)).strip()}\n\n", text, flags=re.I | re.S)
-    text = re.sub(r"<\s*li[^>]*>(.*?)<\s*/li\s*>", lambda m: f"- {re.sub(r'<[^>]+>', '', m.group(1)).strip()}\n", text, flags=re.I | re.S)
-    text = re.sub(r"<\s*(strong|b)[^>]*>(.*?)<\s*/\1\s*>", lambda m: f"**{re.sub(r'<[^>]+>', '', m.group(2)).strip()}**", text, flags=re.I | re.S)
-    text = re.sub(r"<\s*(em|i)[^>]*>(.*?)<\s*/\1\s*>", lambda m: f"*{re.sub(r'<[^>]+>', '', m.group(2)).strip()}*", text, flags=re.I | re.S)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = html.unescape(text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r"[ \t]{2,}", " ", text)
-    return text.strip()
-
-
-def _docx_to_markdown_like(raw_bytes: bytes) -> str:
-    with zipfile.ZipFile(io.BytesIO(raw_bytes)) as archive:
-        try:
-            document_xml = archive.read("word/document.xml")
-        except KeyError as exc:
-            raise HTTPException(status_code=400, detail="DOCX document.xml is missing") from exc
-
-    root = ET.fromstring(document_xml)
-    namespace = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    paragraphs: list[str] = []
-    for paragraph in root.findall(".//w:p", namespace):
-        style_value = ""
-        style = paragraph.find("./w:pPr/w:pStyle", namespace)
-        if style is not None:
-            style_value = str(style.attrib.get("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val") or "")
-        text = "".join(node.text or "" for node in paragraph.findall(".//w:t", namespace)).strip()
-        if not text:
-            continue
-        if style_value.startswith("Heading1"):
-            paragraphs.append(f"# {text}")
-        elif style_value.startswith("Heading2"):
-            paragraphs.append(f"## {text}")
-        elif style_value.startswith("Heading3"):
-            paragraphs.append(f"### {text}")
-        else:
-            paragraphs.append(text)
-    return "\n\n".join(paragraphs).strip()
-
-
 def _extract_upload_content(filename: str, raw_bytes: bytes) -> str:
-    suffix = Path(filename).suffix.lower()
-    if suffix == ".docx":
-        return _docx_to_markdown_like(raw_bytes)
-    content = _decode_text_bytes(raw_bytes)
-    normalized = content.replace("\r\n", "\n").strip()
-    if suffix in {".html", ".htm"}:
-        return _html_to_markdown_like(normalized)
-    return normalized
+    return extract_upload_content(filename, raw_bytes)
 
 
 def list_editorial_articles(
@@ -2331,6 +2269,43 @@ def create_editorial_from_upload(filename: str, raw_bytes: bytes) -> dict:
     )
 
 
+async def upload_editorial_cover_image(
+    *,
+    editorial_id: int,
+    upload_file: UploadFile,
+    filename: str,
+    content_type: str | None = None,
+) -> dict:
+    saved = await save_image_upload(
+        upload_file=upload_file,
+        target_dir=EDITORIAL_UPLOADS_DIR / "covers",
+        filename=filename,
+        content_type=content_type,
+    )
+    relative_url = f"/editorial-uploads/covers/{quote(saved['filename'])}"
+    with connection_scope() as connection:
+        _fetch_editorial_row(connection, editorial_id)
+        connection.execute(
+            """
+            UPDATE editorial_articles
+            SET cover_image_url = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                relative_url,
+                _now_iso(),
+                editorial_id,
+            ),
+        )
+        connection.commit()
+    return {
+        "filename": saved["filename"],
+        "usage": "cover",
+        "url": relative_url,
+        "article": get_editorial_article(editorial_id),
+    }
+
+
 def auto_format_editorial_article(editorial_id: int, payload: dict | None = None) -> dict:
     request_payload = payload or {}
     with connection_scope() as connection:
@@ -2741,7 +2716,7 @@ def publish_editorial_article(editorial_id: int) -> dict:
                 SET doc_id = ?, slug = ?, relative_path = ?, source = ?, source_mode = ?, title = ?,
                     publish_date = ?, link = ?, content = ?, excerpt = ?, main_topic = ?, article_type = ?,
                     series_or_column = ?, primary_org_name = ?, tag_text = ?, people_text = '',
-                    org_text = ?, search_text = ?, word_count = ?, cover_image_path = NULL,
+                    org_text = ?, search_text = ?, word_count = ?, cover_image_path = ?,
                     access_level = ?, updated_at = ?
                 WHERE id = ?
                 """,
@@ -2764,6 +2739,7 @@ def publish_editorial_article(editorial_id: int) -> dict:
                     "",
                     f"{row['title']} {excerpt or ''} {plain_text[:4000]}",
                     _word_count(plain_text),
+                    row.get("cover_image_url") or None,
                     row.get("access_level") or "public",
                     now,
                     article_id,
@@ -2778,7 +2754,7 @@ def publish_editorial_article(editorial_id: int) -> dict:
                     tag_text, people_text, org_text, search_text, word_count, cover_image_path, access_level,
                     view_count, is_featured, created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, NULL, ?, 0, 0, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, 0, 0, ?, ?)
                 """,
                 (
                     hashlib.sha1(f"editorial:{editorial_id}:{public_slug}".encode("utf-8")).hexdigest()[:20],
@@ -2799,6 +2775,7 @@ def publish_editorial_article(editorial_id: int) -> dict:
                     "",
                     f"{row['title']} {excerpt or ''} {plain_text[:4000]}",
                     _word_count(plain_text),
+                    row.get("cover_image_url") or None,
                     row.get("access_level") or "public",
                     now,
                     now,

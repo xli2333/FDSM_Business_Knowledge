@@ -13,7 +13,9 @@
     "userflow:acceptance": "node scripts/user_flow_acceptance.mjs",
     "editorial:acceptance:round95": "node scripts/editorial_acceptance_round95.mjs",
     "content-ops:acceptance:round99": "node scripts/content_ops_acceptance_round99.mjs",
-    "editorial:acceptance:round101": "node scripts/editorial_acceptance_round101.mjs"
+    "editorial:acceptance:round101": "node scripts/editorial_acceptance_round101.mjs",
+    "media:acceptance:round106": "node scripts/media_acceptance_round106.mjs",
+    "cover:acceptance:round109": "node scripts/cover_acceptance_round109.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
