@@ -10,9 +10,9 @@ import threading
 # --- 1. 配置区域 ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # 新的保存目录
-SAVE_ROOT = os.path.join(BASE_DIR, "Fudan_Business_Knowledge_Data")
+SAVE_ROOT = os.path.join(BASE_DIR, "锦缎")
 # 链接文件路径
-LINKS_FILE = os.path.join(BASE_DIR, "复旦商业知识_links.txt")
+LINKS_FILE = os.path.join(BASE_DIR, "锦缎_links.txt")
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"

@@ -7,10 +7,23 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prelaunch:acceptance": "node scripts/prelaunch_acceptance.mjs",
+    "visual:acceptance": "node scripts/visual_acceptance.mjs",
+    "userflow:acceptance": "node scripts/user_flow_acceptance.mjs",
+    "editorial:acceptance:round95": "node scripts/editorial_acceptance_round95.mjs",
+    "content-ops:acceptance:round99": "node scripts/content_ops_acceptance_round99.mjs",
+    "editorial:acceptance:round101": "node scripts/editorial_acceptance_round101.mjs"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
     "@tailwindcss/postcss": "^4.1.18",
+    "@tiptap/extension-color": "^3.22.3",
+    "@tiptap/extension-text-align": "^3.22.3",
+    "@tiptap/extension-text-style": "^3.22.3",
+    "@tiptap/extension-underline": "^3.22.3",
+    "@tiptap/react": "^3.22.3",
+    "@tiptap/starter-kit": "^3.22.3",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "framer-motion": "^12.23.26",
@@ -18,6 +31,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.0.0",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
@@ -30,6 +44,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
     "globals": "^16.5.0",
+    "playwright": "^1.58.2",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.18",
     "vite": "^7.2.4"

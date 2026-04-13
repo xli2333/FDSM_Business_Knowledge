@@ -1,0 +1,25 @@
+# Round69 结构归一化修补与44篇severe补跑
+
+- [x] 读取 Round68 进度与剩余 severe 集合，确认旧 worker 仍在使用修补前代码
+- [x] 重写 `backend/services/display_markdown_service.py`，清除中文乱码正则与错误模式
+- [x] 重写 `backend/services/markdown_structure_quality_service.py`，统一 severe 判定规则
+- [x] 修正 `backend/services/article_relayout_service.py` 中文 relayout prompt 中的结构示例与元信息说明
+- [x] 重写 `backend/tests/test_display_markdown_service.py`
+- [x] 重写 `backend/tests/test_markdown_structure_quality_service.py`
+- [x] 补充 `01 标题 + 正文同行`、`Part/Q&A 同行`、组合头噪音的测试样例
+- [x] 跑 `pytest backend/tests/test_display_markdown_service.py backend/tests/test_markdown_structure_quality_service.py backend/tests/test_article_relayout_service.py -q`
+- [x] 确认 `14 passed`
+- [x] 抽查剩余坏稿样本 `1790 / 1457 / 1420 / 1405`，定位 inline 结构漏口
+- [x] 补 `组合型顶部噪音`、`Part/Q&A inline 拆分`、`引号标题后接正文`、`编号标题后接正文` 的归一化规则
+- [x] 停止旧 `round68-remaining-64` 进程，避免旧代码继续写入
+- [x] 用新规则重扫 severe 集合
+- [x] 记录新 severe 数量为 `44`
+- [x] 启动 Round69 shard worker 对这 `44` 篇强制 Gemini 补跑
+- [x] 确认 `6` 个 shard 全部接单并开始写入 state
+- [x] 首轮进度确认：`3 / 44` 已完成
+- [x] 二次重扫确认 severe 从 `44` 降到 `33`
+- [ ] 监测 shard 进度并处理失败项
+- [ ] 补跑结束后再次 `scan`，确认 severe 数量继续下降
+- [ ] 抽中文问题样本截图，重点复核 `2037 / 1457 / 1420 / 1405`
+- [ ] 抽英文对应页面截图，确认摘要区与正文区都不再出现 markdown 裸奔或结构塌陷
+- [ ] 如果 still severe > 0，开 Round70 中文 todo 继续压缩

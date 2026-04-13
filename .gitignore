@@ -31,3 +31,17 @@ frontend/dist/
 # IDE
 .vscode/
 .idea/
+
+# Local tooling and publish exclusions
+.claude/
+.pytest_cache/
+audio/
+archive/legacy_pre_knowledge_base/
+faiss_index_business/
+qa/
+uploads/
+公众号排版/
+_publish_clean/
+reports/*.log
+docs/project-manual/14-API接口文档.md
+frontend/src/api.js
