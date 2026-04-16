@@ -1,12 +1,36 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..')
-const WECHAT_SERVICE_PATH = path.join(PROJECT_ROOT, '公众号排版', 'server', 'wechatOfficialPublisherService.mjs')
+const WECHAT_RUNTIME_ROOT = path.join(PROJECT_ROOT, 'backend', 'wechat_runtime')
+const WECHAT_SERVICE_PATH = path.join(WECHAT_RUNTIME_ROOT, 'wechatOfficialPublisherService.mjs')
 
-const { generateWechatDraftPreview } = await import(pathToFileURL(WECHAT_SERVICE_PATH).href)
+async function loadWechatRuntime() {
+  if (!fs.existsSync(WECHAT_SERVICE_PATH)) {
+    throw new Error(
+      `Bundled WeChat runtime is missing: ${WECHAT_SERVICE_PATH}. ` +
+        'Restore backend/wechat_runtime before using editorial auto-format.',
+    )
+  }
+
+  try {
+    const runtimeModule = await import(pathToFileURL(WECHAT_SERVICE_PATH).href)
+    if (typeof runtimeModule.generateWechatDraftPreview !== 'function') {
+      throw new Error('generateWechatDraftPreview export is missing.')
+    }
+    return runtimeModule.generateWechatDraftPreview
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(
+      `Bundled WeChat runtime failed to load from ${WECHAT_SERVICE_PATH}: ${message}`,
+    )
+  }
+}
+
+const generateWechatDraftPreview = await loadWechatRuntime()
 
 function normalizeText(value) {
   return String(value ?? '').trim()
@@ -53,7 +77,7 @@ function buildTitleHeader(item) {
         metaParts.length
           ? `<p style="margin: 0; color: #94A3B8; font-family: 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif; font-size: 15px; line-height: 1.8;">${metaParts
               .map((part) => escapeHtml(part))
-              .join('　')}</p>`
+              .join(' / ')}</p>`
           : ''
       }
     </section>

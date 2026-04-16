@@ -10,19 +10,20 @@ import {
   UploadCloud,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   createMediaAdminItem,
   deleteMediaAdminItem,
   fetchMediaAdminItem,
   fetchMediaAdminItems,
-  fetchMediaAdminSourceItems,
   generateMediaAdminCopy,
   publishMediaAdminItem,
-  reopenMediaAdminSourceItem,
   resolveApiUrl,
+  rewriteMediaAdminChapters,
   updateMediaAdminItem,
   uploadMediaAdminFile,
 } from '../api/index.js'
+import MediaMarkdownBlock from '../components/media/MediaMarkdownBlock.jsx'
 import { useLanguage } from '../i18n/LanguageContext.js'
 
 const DEFAULT_FORM = {
@@ -94,7 +95,6 @@ function buildPersistPayload(form) {
     body_markdown: String(form.body_markdown || '').trim() || null,
     transcript_markdown: String(form.transcript_markdown || '').trim() || null,
     script_markdown: String(form.script_markdown || '').trim() || null,
-    chapters: Array.isArray(form.chapters) ? form.chapters : [],
   }
 }
 
@@ -132,7 +132,7 @@ function getUploadAccept(kind, usage) {
 function getDraftStatusLabel(item, isEnglish) {
   if (!item) return ''
   if (item.is_reopened_from_published) {
-    return isEnglish ? 'Back in draft box' : '已打回草稿箱'
+    return isEnglish ? 'Published / Re-editing' : '已发布 / 重编中'
   }
   return isEnglish ? 'Draft' : '草稿'
 }
@@ -172,13 +172,12 @@ function readMediaDuration(file, kind) {
 
 function MediaStudioPage() {
   const { isEnglish } = useLanguage()
+  const [searchParams, setSearchParams] = useSearchParams()
   const mediaInputRef = useRef(null)
   const coverInputRef = useRef(null)
   const textUploadInputRef = useRef(null)
   const selectedIdRef = useRef(null)
   const [drafts, setDrafts] = useState([])
-  const [sourceItems, setSourceItems] = useState([])
-  const [sourceTotal, setSourceTotal] = useState(0)
   const [selectedId, setSelectedId] = useState(null)
   const [detail, setDetail] = useState(null)
   const [form, setForm] = useState(DEFAULT_FORM)
@@ -186,7 +185,11 @@ function MediaStudioPage() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [filterKind, setFilterKind] = useState('')
-  const [sourceQuery, setSourceQuery] = useState('')
+  const requestedDraftId = useMemo(() => {
+    const value = Number(searchParams.get('draft_id') || '')
+    return Number.isFinite(value) && value > 0 ? value : null
+  }, [searchParams])
+  const reopenedFromPublished = searchParams.get('reopened') === '1'
 
   useEffect(() => {
     selectedIdRef.current = selectedId
@@ -205,12 +208,12 @@ function MediaStudioPage() {
     return next
   }, [])
 
-  const loadSourceItems = useCallback(async () => {
-    const payload = await fetchMediaAdminSourceItems(filterKind, sourceQuery, 18)
-    setSourceItems(payload.items || [])
-    setSourceTotal(payload.total || 0)
-    return payload
-  }, [filterKind, sourceQuery])
+  const clearMediaEntryQuery = useCallback(() => {
+    const next = new URLSearchParams(searchParams)
+    next.delete('draft_id')
+    next.delete('reopened')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
 
   const loadDrafts = useCallback(
     async (preferredId = null) => {
@@ -218,7 +221,7 @@ function MediaStudioPage() {
       const items = payload.items || []
       setDrafts(items)
       const candidateId =
-        [preferredId, selectedIdRef.current, items[0]?.id].find((candidate) => items.some((item) => item.id === candidate)) || null
+        [preferredId, selectedIdRef.current, requestedDraftId, items[0]?.id].find((candidate) => items.some((item) => item.id === candidate)) || null
       if (candidateId) {
         await syncDraftDetail(candidateId)
       } else {
@@ -231,25 +234,18 @@ function MediaStudioPage() {
       }
       return payload
     },
-    [filterKind, syncDraftDetail],
+    [filterKind, requestedDraftId, syncDraftDetail],
   )
 
   const refreshAll = useCallback(async (preferredId = null) => {
-    await Promise.all([loadDrafts(preferredId), loadSourceItems()])
-  }, [loadDrafts, loadSourceItems])
+    await loadDrafts(preferredId)
+  }, [loadDrafts])
 
   useEffect(() => {
-    refreshAll().catch((err) => {
+    refreshAll(requestedDraftId).catch((err) => {
       setError(err?.message || (isEnglish ? 'Failed to load media studio.' : '媒体后台加载失败。'))
     })
-  }, [isEnglish, refreshAll])
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      loadSourceItems().catch(() => {})
-    }, 280)
-    return () => window.clearTimeout(timer)
-  }, [loadSourceItems])
+  }, [isEnglish, refreshAll, requestedDraftId])
 
   const counts = useMemo(() => {
     const draftCount = drafts.length
@@ -259,12 +255,12 @@ function MediaStudioPage() {
       draftCount,
       audioDraftCount,
       videoDraftCount,
-      publishedCount: sourceTotal,
     }
-  }, [drafts, sourceTotal])
+  }, [drafts])
 
   const textUploadUsage = form.kind === 'audio' ? 'transcript' : 'script'
   const textUploadLabel = form.kind === 'audio' ? (isEnglish ? 'Upload transcript' : '上传转录') : (isEnglish ? 'Upload script' : '上传脚本')
+  const hasChapterSource = Boolean(String(form.transcript_markdown || '').trim() || String(form.script_markdown || '').trim())
 
   const mediaUrl = resolveApiUrl(form.media_url)
   const coverUrl = resolveApiUrl(form.cover_image_url)
@@ -299,6 +295,7 @@ function MediaStudioPage() {
 
   const handleCreate = () => {
     resetMessages()
+    clearMediaEntryQuery()
     setSelectedId(null)
     setDetail(null)
     setForm({
@@ -309,6 +306,9 @@ function MediaStudioPage() {
 
   const handleSelect = (id) =>
     run('select', async () => {
+      if (requestedDraftId && requestedDraftId !== id) {
+        clearMediaEntryQuery()
+      }
       await syncDraftDetail(id)
     })
 
@@ -322,6 +322,9 @@ function MediaStudioPage() {
   const handleDelete = () =>
     run('delete', async () => {
       if (!selectedId) return
+      if (requestedDraftId && requestedDraftId === selectedId) {
+        clearMediaEntryQuery()
+      }
       await deleteMediaAdminItem(selectedId)
       await refreshAll()
       setMessage(isEnglish ? 'Draft deleted.' : '草稿已删除。')
@@ -332,12 +335,23 @@ function MediaStudioPage() {
       const saved = await persistDraft()
       const generated = await generateMediaAdminCopy(saved.id)
       await refreshAll(generated.id)
-      setMessage(isEnglish ? 'Program copy generated.' : '节目文字素材已生成。')
+      setMessage(isEnglish ? 'Program copy generated and chapters refreshed.' : '节目文字素材已生成，并已按最新文本刷新章节。')
+    })
+
+  const handleRewriteChapters = () =>
+    run('rewrite-chapters', async () => {
+      const saved = await persistDraft()
+      const rewritten = await rewriteMediaAdminChapters(saved.id)
+      await refreshAll(rewritten.id)
+      setMessage(isEnglish ? 'Chapters rewritten from the latest transcript or script.' : '已按最新转录或脚本重写章节。')
     })
 
   const handlePublish = () =>
     run('publish', async () => {
       const saved = await persistDraft()
+      if (requestedDraftId && requestedDraftId === saved.id) {
+        clearMediaEntryQuery()
+      }
       const published = await publishMediaAdminItem(saved.id)
       await refreshAll()
       setMessage(
@@ -349,13 +363,6 @@ function MediaStudioPage() {
             ? 'Published successfully.'
             : '发布成功。',
       )
-    })
-
-  const handleReopen = (mediaItemId) =>
-    run('reopen', async () => {
-      const reopened = await reopenMediaAdminSourceItem(mediaItemId)
-      await refreshAll(reopened.id)
-      setMessage(isEnglish ? 'Published media was sent back to the draft box.' : '已发布媒体已打回草稿箱。')
     })
 
   const handleUpload = async (usage, file) => {
@@ -407,9 +414,14 @@ function MediaStudioPage() {
             </h1>
             <p className="mt-5 max-w-3xl text-base leading-8 text-white/84">
               {isEnglish
-                ? 'Upload the primary media file first, then upload transcript or script, generate program copy, save drafts, publish, and reopen live media back into the draft box when needed.'
-                : '先上传主媒体文件，再上传转录或脚本，自动生成节目简介等文字素材，保存草稿、发布，并在需要时把线上内容重新打回草稿箱。'}
+                ? 'Upload the primary media file first, then upload transcript or script, generate program copy, save drafts, and publish. When a live item needs changes, reopen editing from the published audio or video page.'
+                : '先上传主媒体文件，再上传转录或脚本，自动生成节目简介等文字素材，保存草稿并发布。已发布内容如需修改，请从正式音频或视频页面进入重新编辑。'}
             </p>
+            <div className="mt-4 max-w-3xl text-xs leading-6 text-white/72">
+              {isEnglish
+                ? 'Chapters auto-detect right after text upload. Plain save only recalculates when the transcript or script actually changes. Rewrite chapters and Generate copy both force a fresh AI pass that prefers the full transcript when it exists.'
+                : '上传文本后会立即识别章节。普通保存只有在转录或脚本文本真的变化时才会重算；点击“重写章节”和“生成文案”都会强制重新交给 AI 处理，并在有转录时优先使用整份转录。'}
+            </div>
             <div className="mt-8 flex flex-wrap gap-3">
               <button
                 type="button"
@@ -430,8 +442,17 @@ function MediaStudioPage() {
               </button>
               <button
                 type="button"
+                onClick={handleRewriteChapters}
+                disabled={Boolean(busy) || !hasChapterSource}
+                className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-6 py-3 text-sm font-semibold tracking-[0.16em] text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busy === 'rewrite-chapters' ? <LoaderCircle size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                {isEnglish ? 'Rewrite chapters' : '重写章节'}
+              </button>
+              <button
+                type="button"
                 onClick={handleGenerateCopy}
-                disabled={Boolean(busy)}
+                disabled={Boolean(busy) || !hasChapterSource}
                 className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-6 py-3 text-sm font-semibold tracking-[0.16em] text-white transition hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {busy === 'generate' ? <LoaderCircle size={16} className="animate-spin" /> : <Sparkles size={16} />}
@@ -449,14 +470,10 @@ function MediaStudioPage() {
             </div>
           </div>
 
-          <div className="grid gap-4 self-start md:grid-cols-2 lg:grid-cols-2">
+          <div className="grid gap-4 self-start md:grid-cols-3">
             <div className="rounded-[1.4rem] border border-white/12 bg-white/10 p-5 backdrop-blur">
               <div className="text-xs uppercase tracking-[0.24em] text-white/65">{isEnglish ? 'Active drafts' : '活跃草稿'}</div>
               <div className="mt-3 font-serif text-3xl font-black text-white">{counts.draftCount}</div>
-            </div>
-            <div className="rounded-[1.4rem] border border-white/12 bg-white/10 p-5 backdrop-blur">
-              <div className="text-xs uppercase tracking-[0.24em] text-white/65">{isEnglish ? 'Published items' : '已发布内容'}</div>
-              <div className="mt-3 font-serif text-3xl font-black text-white">{counts.publishedCount}</div>
             </div>
             <div className="rounded-[1.4rem] border border-white/12 bg-white/10 p-5 backdrop-blur">
               <div className="text-xs uppercase tracking-[0.24em] text-white/65">{isEnglish ? 'Audio drafts' : '音频草稿'}</div>
@@ -473,10 +490,20 @@ function MediaStudioPage() {
       {error ? <div className="mt-6 text-sm text-red-500">{error}</div> : null}
       {message ? <div className="mt-6 text-sm text-emerald-700">{message}</div> : null}
 
-      <section className="mt-8 grid gap-6 xl:grid-cols-[0.78fr_1.22fr]">
-        <aside className="space-y-6">
-          <div className="fudan-panel p-6">
-            <div className="section-kicker">{isEnglish ? 'Filter' : '筛选'}</div>
+      <section className="mt-8 grid items-start gap-6 xl:grid-cols-[minmax(300px,340px)_minmax(0,1fr)]">
+        <aside className="space-y-4 xl:sticky xl:top-24 xl:self-start">
+          <div className="fudan-panel p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="section-kicker">{isEnglish ? 'Navigation' : '侧栏导航'}</div>
+                <div className="mt-1 text-xs leading-6 text-slate-400">
+                  {isEnglish
+                    ? 'Keep this column compact. Filter drafts here and reopen published items from the live audio or video pages.'
+                    : '左栏只保留紧凑导航职责：在这里筛选草稿，已发布内容请从正式音频或视频页进入重新编辑。'}
+                </div>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">{counts.draftCount}</span>
+            </div>
             <div className="mt-4 grid gap-3">
               <select
                 value={filterKind}
@@ -496,9 +523,33 @@ function MediaStudioPage() {
                 {isEnglish ? 'Refresh' : '刷新'}
               </button>
             </div>
+            <div className="mt-4 rounded-[1.1rem] border border-slate-200/70 bg-slate-50/80 p-4">
+              <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                {isEnglish ? 'Published entry' : '正式页入口'}
+              </div>
+              <p className="mt-2 text-xs leading-6 text-slate-500">
+                {isEnglish
+                  ? 'Use the admin-only "Edit again" action on live audio or video cards.'
+                  : '已发布音频和视频请从正式卡片上的管理员专属“重新编辑”入口进入。'}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link
+                  to="/audio"
+                  className="inline-flex items-center justify-center rounded-full border border-fudan-blue/15 bg-white px-3 py-2 text-xs font-semibold text-fudan-blue transition hover:bg-fudan-blue/5"
+                >
+                  {isEnglish ? 'Audio page' : '音频页'}
+                </Link>
+                <Link
+                  to="/video"
+                  className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-fudan-blue/30"
+                >
+                  {isEnglish ? 'Video page' : '视频页'}
+                </Link>
+              </div>
+            </div>
           </div>
 
-          <div className="fudan-panel p-6">
+          <div className="fudan-panel p-5">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="section-kicker">{isEnglish ? 'Draft box' : '草稿箱'}</div>
@@ -506,7 +557,7 @@ function MediaStudioPage() {
               </div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-500">{counts.draftCount}</span>
             </div>
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 max-h-[min(46vh,28rem)] space-y-2 overflow-y-auto pr-1">
               {drafts.length ? (
                 drafts.map((item) => (
                   <button
@@ -514,70 +565,30 @@ function MediaStudioPage() {
                     type="button"
                     onClick={() => handleSelect(item.id)}
                     className={[
-                      'block w-full rounded-[1.2rem] border p-4 text-left transition',
-                      selectedId === item.id ? 'border-fudan-blue bg-fudan-blue/5' : 'border-slate-200/70 bg-white hover:bg-slate-50',
+                      'block w-full rounded-[1rem] border px-3 py-3 text-left transition',
+                      selectedId === item.id ? 'border-fudan-blue bg-fudan-blue/5 shadow-[0_8px_18px_rgba(13,7,131,0.08)]' : 'border-slate-200/70 bg-white hover:bg-slate-50',
                     ].join(' ')}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate font-serif text-lg font-bold text-fudan-blue">{item.title || byLanguage(isEnglish, '未命名草稿', 'Untitled draft')}</div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-serif text-base font-bold text-fudan-blue">
+                          {item.title || byLanguage(isEnglish, '未命名草稿', 'Untitled draft')}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
                           <span>{item.kind === 'audio' ? byLanguage(isEnglish, '音频', 'Audio') : byLanguage(isEnglish, '视频', 'Video')}</span>
                           <span>/</span>
                           <span>{formatDuration(item.duration_seconds, isEnglish)}</span>
                         </div>
                       </div>
-                      <span className={['rounded-full border px-3 py-1 text-[11px] font-semibold', getDraftStatusClass(item)].join(' ')}>
+                      <span className={['rounded-full border px-2.5 py-1 text-[10px] font-semibold', getDraftStatusClass(item)].join(' ')}>
                         {getDraftStatusLabel(item, isEnglish)}
                       </span>
                     </div>
                   </button>
                 ))
               ) : (
-                <div className="rounded-[1.2rem] border border-dashed border-slate-300 p-5 text-sm leading-7 text-slate-500">
+                <div className="rounded-[1rem] border border-dashed border-slate-300 p-4 text-sm leading-7 text-slate-500">
                   {isEnglish ? 'No drafts in the draft box yet.' : '当前草稿箱里还没有稿件。'}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="fudan-panel p-6">
-            <div className="section-kicker">{isEnglish ? 'Published library' : '已发布媒体'}</div>
-            <div className="mt-4 grid gap-3">
-              <input
-                value={sourceQuery}
-                onChange={(event) => setSourceQuery(event.target.value)}
-                placeholder={isEnglish ? 'Search published media' : '搜索已发布媒体'}
-                className="rounded-[1.1rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
-              />
-            </div>
-            <div className="mt-4 space-y-3">
-              {sourceItems.length ? (
-                sourceItems.map((item) => (
-                  <div key={item.id} className="rounded-[1.2rem] border border-slate-200/70 bg-white p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="truncate font-serif text-lg font-bold text-fudan-blue">{item.title}</div>
-                        <div className="mt-2 text-xs text-slate-500">
-                          {item.kind === 'audio' ? byLanguage(isEnglish, '音频', 'Audio') : byLanguage(isEnglish, '视频', 'Video')}
-                          {' / '}
-                          {item.visibility_label}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleReopen(item.media_item_id || item.id)}
-                        disabled={Boolean(busy)}
-                        className="rounded-full border border-fudan-blue/20 bg-fudan-blue/5 px-3 py-2 text-xs font-semibold text-fudan-blue transition hover:bg-fudan-blue/10 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {busy === 'reopen' ? (isEnglish ? 'Working...' : '处理中...') : isEnglish ? 'Send to draft box' : '打回草稿箱'}
-                      </button>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="rounded-[1.2rem] border border-dashed border-slate-300 p-5 text-sm leading-7 text-slate-500">
-                  {isEnglish ? 'No published media matched the current search.' : '没有匹配当前搜索条件的已发布媒体。'}
                 </div>
               )}
             </div>
@@ -587,9 +598,13 @@ function MediaStudioPage() {
         <section className="space-y-6">
           {detail?.is_reopened_from_published ? (
             <div className="rounded-[1.4rem] border border-fudan-orange/20 bg-fudan-orange/5 px-5 py-4 text-sm leading-7 text-fudan-orange">
-              {isEnglish
-                ? 'This draft was sent back from a live media item. The online version will not change until you publish again.'
-                : '这份草稿来自线上媒体打回草稿箱的版本，重新发布之前不会影响当前线上内容。'}
+              {reopenedFromPublished && requestedDraftId && detail?.id === requestedDraftId
+                ? isEnglish
+                  ? 'You entered this draft from a published media card. The live version will stay unchanged until you publish again.'
+                  : '当前稿件来自正式媒体页的“重新编辑”。再次发布前，线上版本不会被覆盖。'
+                : isEnglish
+                  ? 'This draft is linked to a published media item. The live version will stay unchanged until you publish again.'
+                  : '当前草稿关联一条已发布媒体。再次发布前，线上版本不会被覆盖。'}
             </div>
           ) : null}
 
@@ -705,8 +720,8 @@ function MediaStudioPage() {
             <div className="section-kicker">{isEnglish ? 'Uploads' : '上传区'}</div>
             <p className="mt-2 text-sm leading-7 text-slate-500">
               {isEnglish
-                ? 'Upload the primary media first, then upload one text material entry. Audio uses transcript and video uses script. The studio only keeps AI-generated summary, program description, and chapters visible.'
-                : '先上传主媒体文件，再上传一份文本素材。音频使用转录，视频使用脚本。后台只显示 AI 生成的摘要、节目简介和章节结果。'}
+                ? 'Upload the primary media first, then upload one text material entry. Audio uses transcript and video uses script. When a transcript is available, the studio sends the full transcript to AI first for summary, program description, and chapters; fallback extraction is only used when AI is unavailable.'
+                : '先上传主媒体文件，再上传一份文本素材。音频使用转录，视频使用脚本。只要有转录，后台就会优先把整份转录交给 AI 生成摘要、节目简介和章节；只有 AI 暂不可用时，才会回退到基础提取结果。'}
             </p>
 
             <div className="mt-6 grid gap-4 md:grid-cols-3">
@@ -790,6 +805,18 @@ function MediaStudioPage() {
                 placeholder={isEnglish ? 'Program summary' : '节目摘要'}
                 className="mt-4 w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-7 outline-none"
               />
+              <div className="mt-4 rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                  {isEnglish ? 'Rendered preview' : '渲染预览'}
+                </div>
+                {String(form.summary || '').trim() ? (
+                  <MediaMarkdownBlock content={form.summary} dataScope="draft-summary" />
+                ) : (
+                  <div className="text-sm leading-7 text-slate-400">
+                    {isEnglish ? 'The summary preview will appear here after you generate or edit it.' : '生成或编辑摘要后，会在这里看到渲染预览。'}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="fudan-panel p-6">
               <div className="section-kicker">{isEnglish ? 'Program description' : '节目简介'}</div>
@@ -801,16 +828,39 @@ function MediaStudioPage() {
                 placeholder={isEnglish ? 'Program intro in Markdown' : '节目简介 Markdown'}
                 className="mt-4 w-full rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-7 outline-none"
               />
+              <div className="mt-4 rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="mb-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                  {isEnglish ? 'Rendered preview' : '渲染预览'}
+                </div>
+                {String(form.body_markdown || '').trim() ? (
+                  <MediaMarkdownBlock content={form.body_markdown} dataScope="draft-body" />
+                ) : (
+                  <div className="text-sm leading-7 text-slate-400">
+                    {isEnglish
+                      ? 'The program description preview will appear here after you generate or edit it.'
+                      : '生成或编辑节目简介后，会在这里看到渲染预览。'}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
           <div className="grid gap-6 lg:grid-cols-[1fr_auto]">
             <div className="fudan-panel p-6">
               <div className="section-kicker">{isEnglish ? 'Generated chapters' : '识别章节'}</div>
+              <div className="mt-2 text-xs leading-6 text-slate-400">
+                {isEnglish
+                  ? 'Text upload auto-detects chapters. Save only recalculates when the source text changes. Rewrite chapters and Generate copy both force a fresh AI rewrite and prefer the full transcript whenever it exists.'
+                  : '上传文本会立即识别章节。保存只有在文本源变化时才会自动重算；点击“重写章节”和“生成文案”都会强制交给 AI 重写目录，并在有转录时优先使用整份转录。'}
+              </div>
               {Array.isArray(form.chapters) && form.chapters.length ? (
                 <div className="mt-4 grid gap-3">
                   {form.chapters.map((chapter, index) => (
-                    <div key={`${chapter.timestamp_label}-${index}`} className="rounded-[1.1rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                    <div
+                      key={`${chapter.timestamp_label}-${index}`}
+                      data-chapter-item={chapter.timestamp_label}
+                      className="rounded-[1.1rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600"
+                    >
                       <span className="font-semibold text-fudan-blue">{chapter.timestamp_label}</span>
                       {' / '}
                       {chapter.title}
@@ -819,9 +869,13 @@ function MediaStudioPage() {
                 </div>
               ) : (
                 <div className="mt-4 rounded-[1.2rem] border border-dashed border-slate-300 p-5 text-sm leading-7 text-slate-500">
-                  {isEnglish
-                    ? 'No chapters detected yet. Upload the transcript or script material first if you want timestamp suggestions.'
-                    : '暂未识别章节。如需时间戳建议，请先上传对应的转录或脚本文本。'}
+                  {hasChapterSource
+                    ? isEnglish
+                      ? 'The transcript or script is already uploaded, but no valid timestamps were detected yet. Try `00:00 Opening` or `Speaker 1 00:00`.'
+                      : '已上传转录或脚本文本，但暂未识别到可用时间戳。请尽量使用 `00:00 开场` 或 `发言人 1 00:00` 这类格式。'
+                    : isEnglish
+                      ? 'No chapters detected yet. Upload the transcript or script material first if you want timestamp suggestions.'
+                      : '暂未识别章节。如需时间戳建议，请先上传对应的转录或脚本文本。'}
                 </div>
               )}
             </div>
@@ -839,11 +893,20 @@ function MediaStudioPage() {
               <button
                 type="button"
                 onClick={handleGenerateCopy}
-                disabled={Boolean(busy)}
+                disabled={Boolean(busy) || !hasChapterSource}
                 className="inline-flex items-center justify-center gap-2 rounded-full border border-fudan-orange/20 bg-fudan-orange/5 px-5 py-3 text-sm font-semibold text-fudan-orange transition hover:bg-fudan-orange/10 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {busy === 'generate' ? <LoaderCircle size={16} className="animate-spin" /> : <Sparkles size={16} />}
                 {isEnglish ? 'Generate copy' : '生成文案'}
+              </button>
+              <button
+                type="button"
+                onClick={handleRewriteChapters}
+                disabled={Boolean(busy) || !hasChapterSource}
+                className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-fudan-blue transition hover:border-fudan-blue/20 hover:bg-fudan-blue/5 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busy === 'rewrite-chapters' ? <LoaderCircle size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                {isEnglish ? 'Rewrite chapters' : '重写章节'}
               </button>
               <button
                 type="button"
@@ -871,13 +934,21 @@ function MediaStudioPage() {
               <div className="fudan-panel p-6">
                 <div className="section-kicker">{isEnglish ? 'Published summary' : '线上摘要'}</div>
                 <div className="mt-4 rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-4 text-sm leading-7 text-slate-600">
-                  {detail.published_summary || (isEnglish ? 'No published summary yet.' : '线上摘要暂为空。')}
+                  {detail.published_summary ? (
+                    <MediaMarkdownBlock content={detail.published_summary} dataScope="published-summary" />
+                  ) : (
+                    isEnglish ? 'No published summary yet.' : '线上摘要暂为空。'
+                  )}
                 </div>
               </div>
               <div className="fudan-panel p-6">
                 <div className="section-kicker">{isEnglish ? 'Published program description' : '线上节目简介'}</div>
-                <div className="mt-4 whitespace-pre-wrap rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-4 text-sm leading-7 text-slate-600">
-                  {detail.published_body_markdown || (isEnglish ? 'No published program description yet.' : '线上节目简介暂为空。')}
+                <div className="mt-4 rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-4 text-sm leading-7 text-slate-600">
+                  {detail.published_body_markdown ? (
+                    <MediaMarkdownBlock content={detail.published_body_markdown} dataScope="published-body" />
+                  ) : (
+                    isEnglish ? 'No published program description yet.' : '线上节目简介暂为空。'
+                  )}
                 </div>
               </div>
             </div>
@@ -888,6 +959,7 @@ function MediaStudioPage() {
       <input
         ref={mediaInputRef}
         type="file"
+        data-upload-slot="media"
         accept={getUploadAccept(form.kind, 'media')}
         className="hidden"
         onChange={(event) => {
@@ -899,6 +971,7 @@ function MediaStudioPage() {
       <input
         ref={coverInputRef}
         type="file"
+        data-upload-slot="cover"
         accept={getUploadAccept(form.kind, 'cover')}
         className="hidden"
         onChange={(event) => {
@@ -910,6 +983,7 @@ function MediaStudioPage() {
       <input
         ref={textUploadInputRef}
         type="file"
+        data-upload-slot="text"
         accept={getUploadAccept(form.kind, textUploadUsage)}
         className="hidden"
         onChange={(event) => {

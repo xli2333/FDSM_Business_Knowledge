@@ -26,6 +26,7 @@ from backend.services.editorial_service import (
     create_editorial_from_upload,
     auto_format_editorial_article,
     generate_editorial_summary,
+    generate_editorial_translation,
     generate_editorial_tags,
     get_editorial_dashboard,
     get_editorial_article,
@@ -75,12 +76,18 @@ def editorial_articles(
     limit: int = 40,
     status: str | None = None,
     workflow_status: str | None = None,
+    draft_box_state: str | None = "active",
     authorization: str | None = Header(default=None),
     x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
     x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
 ):
     _require_editorial_admin(authorization, x_debug_user_id, x_debug_user_email)
-    return list_editorial_articles(limit=limit, status=status, workflow_status=workflow_status)
+    return list_editorial_articles(
+        limit=limit,
+        status=status,
+        workflow_status=workflow_status,
+        draft_box_state=draft_box_state,
+    )
 
 
 @router.get("/source-articles", response_model=list[EditorialSourceArticleSummary])
@@ -249,6 +256,17 @@ def editorial_article_auto_summary(
 ):
     _require_editorial_admin(authorization, x_debug_user_id, x_debug_user_email)
     return generate_editorial_summary(editorial_id)
+
+
+@router.post("/articles/{editorial_id}/auto-translate", response_model=EditorialArticleDetail)
+def editorial_article_auto_translate(
+    editorial_id: int,
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    _require_editorial_admin(authorization, x_debug_user_id, x_debug_user_email)
+    return generate_editorial_translation(editorial_id)
 
 
 @router.post("/articles/{editorial_id}/workflow", response_model=EditorialArticleDetail)

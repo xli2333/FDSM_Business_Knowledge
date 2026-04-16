@@ -1,22 +1,13 @@
 import { MessageSquare, Send, Sparkles, Trash2, X } from 'lucide-react'
-import { useEffect, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import { Link } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
 import { deleteChatSession, fetchChatSession, fetchChatSessions, sendChatMessage } from '../../api/index.js'
 import { useLanguage } from '../../i18n/LanguageContext.js'
+import { normalizeChatMarkdown } from '../../lib/chatMarkdown.js'
+import AssistantResponseCard from './AssistantResponseCard.jsx'
 
 const COPY = {
   zh: {
-    quickCommands: [
-      { label: '\u4eca\u65e5\u4e00\u8bfb', value: '/\u4eca\u65e5\u4e00\u8bfb' },
-      { label: 'AI \u7b80\u62a5', value: '/\u7b80\u62a5 AI\u6218\u7565' },
-      { label: 'ESG \u603b\u7ed3', value: '/\u603b\u7ed3 ESG\u8f6c\u578b' },
-      { label: 'AI \u4e0e ESG', value: '/\u6bd4\u8f83 AI \u4e0e ESG' },
-      { label: '\u751f\u6210\u5f0f AI \u65f6\u95f4\u7ebf', value: '/\u65f6\u95f4\u7ebf \u751f\u6210\u5f0fAI' },
-      { label: '\u7ee7\u7eed\u9605\u8bfb', value: '/\u7ee7\u7eed\u9605\u8bfb' },
-    ],
-    greeting:
-      '\u53ef\u4ee5\u76f4\u63a5\u63d0\u95ee\uff0c\u4e5f\u53ef\u4ee5\u7528 `/\u7b80\u62a5`\u3001`/\u603b\u7ed3`\u3001`/\u6bd4\u8f83`\u3001`/\u65f6\u95f4\u7ebf`\u3001`/\u4eca\u65e5\u4e00\u8bfb`\u3001`/\u7ee7\u7eed\u9605\u8bfb` \u8fd9\u4e9b\u5feb\u6377\u6307\u4ee4\u76f4\u63a5\u8fdb\u5165\u77e5\u8bc6\u5e93\u5de5\u4f5c\u6d41\u3002',
+    greeting: '\u53ef\u4ee5\u76f4\u63a5\u63d0\u95ee\uff0c\u56f4\u7ed5\u77e5\u8bc6\u5e93\u505a\u7b80\u62a5\u3001\u6bd4\u8f83\u3001\u6574\u5408\u548c\u8ffd\u95ee\u3002',
     errorFallback: '\u672c\u8f6e\u95ee\u7b54\u6682\u672a\u5b8c\u6210\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002',
     sessionManager: '\u4f1a\u8bdd\u7ba1\u7406',
     newSession: '\u65b0\u5efa\u4f1a\u8bdd',
@@ -26,22 +17,15 @@ const COPY = {
     deleteFailed: '\u4f1a\u8bdd\u5220\u9664\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u91cd\u8bd5\u3002',
     assistant: 'AI \u52a9\u7406',
     title: '\u56f4\u7ed5\u77e5\u8bc6\u5e93\u7ee7\u7eed\u63d0\u95ee\u3001\u6bd4\u8f83\u4e0e\u6574\u5408',
-    placeholder:
-      '\u8f93\u5165\u95ee\u9898\uff0c\u6216\u76f4\u63a5\u4f7f\u7528 /\u7b80\u62a5 /\u603b\u7ed3 /\u6bd4\u8f83 /\u65f6\u95f4\u7ebf /\u4eca\u65e5\u4e00\u8bfb /\u7ee7\u7eed\u9605\u8bfb',
+    analysisLabel: '\u5206\u6790',
+    questionLabel: '\u95ee\u9898',
+    sourceTitle: '\u76f8\u5173\u6587\u7ae0',
+    openArticle: '\u6253\u5f00\u6587\u7ae0',
+    placeholder: '\u8f93\u5165\u95ee\u9898\uff0c\u4f8b\u5982\u8981\u7b80\u62a5\u3001\u6bd4\u8f83\u3001\u603b\u7ed3\u6216\u6574\u7406\u65f6\u95f4\u7ebf',
     floatingButton: 'AI \u52a9\u7406',
-    followUps: '\u53ef\u7ee7\u7eed\u64cd\u4f5c',
   },
   en: {
-    quickCommands: [
-      { label: 'Today Read', value: '/today' },
-      { label: 'AI Brief', value: '/brief AI strategy' },
-      { label: 'ESG Summary', value: '/summarize ESG transition' },
-      { label: 'AI vs ESG', value: '/compare AI vs ESG' },
-      { label: 'GenAI Timeline', value: '/timeline Generative AI' },
-      { label: 'Continue Reading', value: '/recommend' },
-    ],
-    greeting:
-      'Ask directly, or use `/brief`, `/summarize`, `/compare`, `/timeline`, `/today`, and `/recommend` to move faster through the knowledge base.',
+    greeting: 'Ask directly to brief, compare, summarize, and synthesize across the knowledge base.',
     errorFallback: 'The assistant could not finish this round. Please try again later.',
     sessionManager: 'Sessions',
     newSession: 'New Session',
@@ -51,16 +35,19 @@ const COPY = {
     deleteFailed: 'Failed to delete the session. Please try again.',
     assistant: 'AI Assistant',
     title: 'Ask, compare, and synthesize across the knowledge base',
-    placeholder: 'Ask a question, or use /brief /summarize /compare /timeline /today /recommend',
+    analysisLabel: 'Analysis',
+    questionLabel: 'Question',
+    sourceTitle: 'Related articles',
+    openArticle: 'Open article',
+    placeholder: 'Ask for a brief, comparison, summary, or timeline across the knowledge base',
     floatingButton: 'AI Assistant',
-    followUps: 'Continue with',
   },
 }
 
 function buildGreeting(content) {
   return {
     role: 'assistant',
-    content,
+    content: normalizeChatMarkdown(content),
     sources: [],
     followUps: [],
   }
@@ -70,6 +57,9 @@ function ChatPanel({ variant = 'floating' }) {
   const embedded = variant === 'page'
   const { isEnglish } = useLanguage()
   const copy = isEnglish ? COPY.en : COPY.zh
+  const textareaRef = useRef(null)
+  const messageViewportRef = useRef(null)
+  const messageEndRef = useRef(null)
 
   const [open, setOpen] = useState(embedded)
   const [sessionId, setSessionId] = useState(null)
@@ -106,6 +96,14 @@ function ChatPanel({ variant = 'floating' }) {
     })
   }, [copy.greeting])
 
+  useEffect(() => {
+    const viewport = messageViewportRef.current
+    if (!viewport) return
+    window.requestAnimationFrame(() => {
+      messageEndRef.current?.scrollIntoView({ block: 'end' })
+    })
+  }, [messages, loading])
+
   const loadSession = async (targetSessionId) => {
     if (!targetSessionId) return
     setSessionError('')
@@ -114,7 +112,7 @@ function ChatPanel({ variant = 'floating' }) {
       const payload = await fetchChatSession(targetSessionId)
       const nextMessages = (payload.messages || []).map((message) => ({
         role: message.role,
-        content: message.content,
+        content: normalizeChatMarkdown(message.content),
         sources: message.sources || [],
         followUps: message.follow_ups || [],
       }))
@@ -131,6 +129,12 @@ function ChatPanel({ variant = 'floating' }) {
     setSessionId(null)
     setMessages([buildGreeting(copy.greeting)])
     setInput('')
+    setLoading(false)
+    setLoadingSessionId(null)
+    setSessionError('')
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus()
+    })
   }
 
   const handleDeleteSession = async (targetSessionId) => {
@@ -169,7 +173,7 @@ function ChatPanel({ variant = 'floating' }) {
         ...current,
         {
           role: 'assistant',
-          content: payload.answer,
+          content: normalizeChatMarkdown(payload.answer),
           sources: payload.sources || [],
           followUps: payload.follow_up_questions || [],
         },
@@ -187,7 +191,7 @@ function ChatPanel({ variant = 'floating' }) {
         ...current,
         {
           role: 'assistant',
-          content: copy.errorFallback,
+          content: normalizeChatMarkdown(copy.errorFallback),
           sources: [],
           followUps: [],
         },
@@ -201,13 +205,8 @@ function ChatPanel({ variant = 'floating' }) {
     await submitMessage(input)
   }
 
-  const handleShortcut = async (value) => {
-    setInput(value)
-    await submitMessage(value)
-  }
-
   const panelBody = (
-    <div className={`fudan-panel flex h-full overflow-hidden ${embedded ? 'min-h-[70vh]' : 'h-[70vh] w-[24rem]'}`}>
+    <div className={`fudan-panel flex h-full overflow-hidden ${embedded ? 'min-h-[70vh]' : 'h-[70vh] w-[24rem]'}`} data-chat-panel={embedded ? 'page' : 'floating'}>
       {embedded ? (
         <aside className="hidden w-72 shrink-0 border-r border-slate-200 bg-slate-50/80 xl:flex xl:flex-col">
           <div className="border-b border-slate-200 px-5 py-4">
@@ -286,74 +285,65 @@ function ChatPanel({ variant = 'floating' }) {
           ) : null}
         </div>
 
-        <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
-          {messages.map((message, index) => (
+        <div ref={messageViewportRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
+          {messages.map((message, index) =>
+            message.role === 'assistant' ? (
+              <AssistantResponseCard
+                key={`${message.role}-${index}`}
+                label={copy.analysisLabel}
+                content={message.content}
+                dataScope="assistant-chat"
+                sources={message.sources}
+                showSources
+                sourceTitle={copy.sourceTitle}
+                openArticleLabel={copy.openArticle}
+                wrapperProps={{ 'data-chat-message': 'assistant' }}
+              />
+            ) : (
+              <div
+                key={`${message.role}-${index}`}
+                className="ml-auto max-w-[88%] rounded-[1rem] border border-fudan-blue/12 bg-fudan-blue/[0.04] px-5 py-4"
+                data-chat-message={message.role}
+              >
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-fudan-blue">{copy.questionLabel}</div>
+                <div className="whitespace-pre-wrap text-base leading-8 text-slate-700">{message.content}</div>
+              </div>
+            ),
+          )}
+          {loading ? (
             <div
-              key={`${message.role}-${index}`}
-              className={[
-                'rounded-[1.4rem] px-4 py-3 text-sm leading-7',
-                message.role === 'assistant'
-                  ? 'border border-slate-200 bg-slate-50 text-slate-700'
-                  : 'ml-10 bg-fudan-blue text-white',
-              ].join(' ')}
+              className="rounded-[1rem] border border-dashed border-slate-300 bg-white px-4 py-4 text-sm text-slate-500"
+              data-chat-message="assistant-loading"
+              aria-live="polite"
             >
-              <ReactMarkdown>{message.content}</ReactMarkdown>
-              {message.sources?.length ? (
-                <div className="mt-3 space-y-2 border-t border-slate-200/80 pt-3 text-xs text-slate-500">
-                  {message.sources.map((source) => (
-                    <Link key={source.id} to={`/article/${source.id}`} className="block hover:text-fudan-blue">
-                      [{source.publish_date}] {source.title}
-                    </Link>
-                  ))}
+              <div className="flex items-center gap-3">
+                <div className="inline-flex items-center gap-2" aria-hidden="true">
+                  <span className="chat-thinking-dot" />
+                  <span className="chat-thinking-dot" />
+                  <span className="chat-thinking-dot" />
                 </div>
-              ) : null}
-              {message.role === 'assistant' && message.followUps?.length ? (
-                <div className="mt-4 border-t border-slate-200/80 pt-3">
-                  <div className="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">{copy.followUps}</div>
-                  <div className="flex flex-wrap gap-2">
-                    {message.followUps.map((followUp) => (
-                      <button
-                        key={`${index}-${followUp}`}
-                        type="button"
-                        onClick={() => handleShortcut(followUp)}
-                        className="rounded-full bg-white px-3 py-1.5 text-xs text-slate-600 transition hover:border-fudan-blue/20 hover:bg-slate-100 hover:text-fudan-blue"
-                      >
-                        {followUp}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+                <span>{isEnglish ? 'Thinking...' : '正在思考...'}</span>
+              </div>
             </div>
-          ))}
+          ) : null}
+          <div ref={messageEndRef} />
         </div>
 
         <div className="border-t border-slate-200 px-4 py-4">
-          <div className="mb-3 flex flex-wrap gap-2 text-xs text-slate-500">
-            {copy.quickCommands.map((command) => (
-              <button
-                key={`${command.label}-${command.value}`}
-                type="button"
-                onClick={() => handleShortcut(command.value)}
-                className="rounded-full bg-slate-100 px-3 py-1 hover:bg-slate-200"
-              >
-                {command.label}
-              </button>
-            ))}
-          </div>
           <div className="flex items-end gap-3">
             <textarea
+              ref={textareaRef}
               rows={embedded ? 4 : 3}
               value={input}
               onChange={(event) => setInput(event.target.value)}
               placeholder={copy.placeholder}
-              className="min-h-[88px] flex-1 rounded-[1.2rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none placeholder:text-slate-400 focus:border-fudan-orange"
+              className="knowledge-console-textarea min-h-[88px] flex-1 resize-none text-base leading-8"
             />
             <button
               type="button"
               onClick={handleSend}
               disabled={loading}
-              className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-fudan-orange text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="knowledge-console-primary h-12 min-w-[3rem] px-4 disabled:cursor-not-allowed disabled:opacity-50"
             >
               <Send size={16} />
             </button>

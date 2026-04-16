@@ -7,6 +7,7 @@ from fastapi import APIRouter
 
 from backend.models.schemas import ChatRequest, ChatResponse, ChatSessionDeleteResponse, ChatSessionDetail, ChatSessionSummary
 from backend.services import ai_service, rag_engine
+from backend.services.chat_markdown_service import normalize_chat_answer_markdown
 from backend.services.catalog_service import (
     append_chat_message,
     delete_chat_session,
@@ -17,6 +18,7 @@ from backend.services.catalog_service import (
     store_chat_session,
 )
 from backend.services.content_localization import contains_cjk
+from backend.services.knowledge_retrieval_service import RetrievalScope, retrieve_scope_context
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -57,7 +59,7 @@ def _normalize_language(requested_language: str | None, text: str = "") -> str:
     return normalized
 
 
-def _build_context_blocks(sources: list[dict]) -> str:
+def _build_article_context_blocks(sources: list[dict]) -> str:
     blocks = []
     for index, item in enumerate(sources, start=1):
         blocks.append(
@@ -67,6 +69,23 @@ def _build_context_blocks(sources: list[dict]) -> str:
                     f"Date: {item['publish_date']}",
                     f"Topic: {item.get('main_topic') or 'N/A'}",
                     f"Excerpt: {item.get('excerpt') or ''}",
+                ]
+            )
+        )
+    return "\n\n".join(blocks)
+
+
+def _build_chunk_context_blocks(chunk_hits: list[dict], limit: int = 6) -> str:
+    blocks: list[str] = []
+    for index, item in enumerate(chunk_hits[: max(limit, 1)], start=1):
+        blocks.append(
+            "\n".join(
+                [
+                    f"[{index}] Title: {item['title']}",
+                    f"Date: {item['publish_date']}",
+                    f"Heading: {item.get('heading') or item['title']}",
+                    f"Excerpt: {item.get('excerpt') or ''}",
+                    f"Chunk: {str(item.get('content') or '')[:1800]}",
                 ]
             )
         )
@@ -102,13 +121,73 @@ def _fallback_answer(question: str, sources: list[dict], language: str) -> str:
     return "\n".join(lines)
 
 
-def _answer_from_sources(question: str, history_text: str, sources: list[dict], fallback_question: str, language: str) -> str:
-    if ai_service.is_ai_enabled() and sources:
+def _public_retrieval(
+    query: str,
+    *,
+    language: str,
+    page_size: int,
+    source_limit: int | None = None,
+    sort: str = "relevance",
+) -> dict:
+    retrieval = retrieve_scope_context(
+        query,
+        scope=RetrievalScope(scope_type="global_public"),
+        page_size=page_size,
+        source_limit=source_limit,
+        language=language,
+    )
+    if retrieval["sources"]:
+        if sort == "date":
+            sorted_sources = sorted(
+                retrieval["sources"],
+                key=lambda item: (str(item.get("publish_date") or ""), float(item.get("score") or 0.0)),
+                reverse=True,
+            )
+            sorted_chunks = sorted(
+                retrieval["chunk_hits"],
+                key=lambda item: (str(item.get("publish_date") or ""), float(item.get("score") or 0.0)),
+                reverse=True,
+            )
+            retrieval = {
+                **retrieval,
+                "sources": sorted_sources,
+                "chunk_hits": sorted_chunks,
+                "context_blocks": _build_chunk_context_blocks(sorted_chunks),
+            }
+        return retrieval
+
+    search_payload = rag_engine.search_articles(
+        query,
+        mode="smart",
+        sort=sort,
+        page=1,
+        page_size=page_size,
+        language=language,
+    )
+    return {
+        "sources": search_payload["items"],
+        "chunk_hits": [],
+        "context_blocks": _build_article_context_blocks(search_payload["items"]),
+        "total_sources": search_payload.get("total", 0),
+        "total_chunks": 0,
+        "provider": "legacy_search_fallback",
+    }
+
+
+def _answer_from_context(
+    question: str,
+    history_text: str,
+    context_blocks: str,
+    sources: list[dict],
+    fallback_question: str,
+    language: str,
+) -> str:
+    if ai_service.is_ai_enabled() and sources and str(context_blocks or "").strip():
         try:
             return ai_service.answer_with_sources(
                 question,
                 history_text,
-                _build_context_blocks(sources),
+                context_blocks,
                 response_language=language,
             )
         except Exception:
@@ -264,8 +343,8 @@ def _build_continue_reading_answer(items: list[dict], mode: str, language: str, 
     elif mode == "contextual":
         intro = _copy(
             language,
-            "\u57fa\u4e8e\u4f60\u8fd9\u8f6e\u5bf9\u8bdd\u5df2\u7ecf\u6d89\u53ca\u7684\u6765\u6e90\u6587\u7ae0\uff0c\u5efa\u8bae\u7ee7\u7eed\u5f80\u4e0b\u8bfb\uff1a",
-            "Based on the sources already touched in this conversation, these are the best next reads:",
+            "\u57fa\u4e8e\u4f60\u8fd9\u8f6e\u5bf9\u8bdd\u5df2\u7ecf\u6d89\u53ca\u7684\u5185\u5bb9\uff0c\u5efa\u8bae\u7ee7\u7eed\u5f80\u4e0b\u8bfb\uff1a",
+            "Based on what this conversation has already touched, these are the best next reads:",
         )
     else:
         intro = _copy(
@@ -317,11 +396,12 @@ def _dispatch_command(command_text: str, history_text: str, session_id: str | No
     if command == "/brief":
         if not argument:
             return _command_usage(command, language, "/\u7b80\u62a5 [\u4e3b\u9898]", "/brief [topic]")
-        payload = rag_engine.search_articles(argument, mode="smart", page=1, page_size=6, language=language)
-        sources = payload["items"]
-        answer = _answer_from_sources(
+        retrieval = _public_retrieval(argument, language=language, page_size=6)
+        sources = retrieval["sources"]
+        answer = _answer_from_context(
             f"Create an executive brief on '{argument}'. Cover the core signals, business implications, what deserves immediate attention, and the next questions worth tracking.",
             history_text,
+            retrieval["context_blocks"],
             sources,
             argument,
             language,
@@ -341,11 +421,12 @@ def _dispatch_command(command_text: str, history_text: str, session_id: str | No
     if command == "/summarize":
         if not argument:
             return _command_usage(command, language, "/\u603b\u7ed3 [\u4e3b\u9898]", "/summarize [topic]")
-        payload = rag_engine.search_articles(argument, mode="smart", page=1, page_size=6, language=language)
-        sources = payload["items"]
-        answer = _answer_from_sources(
+        retrieval = _public_retrieval(argument, language=language, page_size=6)
+        sources = retrieval["sources"]
+        answer = _answer_from_context(
             f"Summarize the core viewpoints, representative themes, and open questions around '{argument}'. Keep the answer dense and source-grounded.",
             history_text,
+            retrieval["context_blocks"],
             sources,
             argument,
             language,
@@ -365,11 +446,12 @@ def _dispatch_command(command_text: str, history_text: str, session_id: str | No
     if command == "/timeline":
         if not argument:
             return _command_usage(command, language, "/\u65f6\u95f4\u7ebf [\u4e3b\u9898]", "/timeline [topic]")
-        payload = rag_engine.search_articles(argument, mode="smart", sort="date", page=1, page_size=8, language=language)
-        sources = payload["items"]
-        answer = _answer_from_sources(
+        retrieval = _public_retrieval(argument, language=language, page_size=8, sort="date")
+        sources = retrieval["sources"]
+        answer = _answer_from_context(
             f"Explain the evolution of '{argument}' as a timeline. Highlight key dates, turning points, and how the framing changed over time.",
             history_text,
+            retrieval["context_blocks"],
             sources,
             argument,
             language,
@@ -393,12 +475,18 @@ def _dispatch_command(command_text: str, history_text: str, session_id: str | No
         if len(parts) != 2:
             return _command_usage(command, language, "/\u6bd4\u8f83 [A] \u4e0e [B]", "/compare [A] vs [B]")
         left, right = parts
-        left_sources = rag_engine.search_articles(left, mode="smart", page=1, page_size=4, language=language)["items"]
-        right_sources = rag_engine.search_articles(right, mode="smart", page=1, page_size=4, language=language)["items"]
+        left_retrieval = _public_retrieval(left, language=language, page_size=4)
+        right_retrieval = _public_retrieval(right, language=language, page_size=4)
+        left_sources = left_retrieval["sources"]
+        right_sources = right_retrieval["sources"]
         sources = _dedupe_sources(left_sources, right_sources)
-        answer = _answer_from_sources(
+        merged_context = "\n\n".join(
+            block for block in (left_retrieval["context_blocks"], right_retrieval["context_blocks"]) if block
+        )
+        answer = _answer_from_context(
             f"Compare '{left}' and '{right}'. Show the overlap, the major differences, and what a business reader should read next.",
             history_text,
+            merged_context,
             sources,
             f"{left} vs {right}",
             language,
@@ -433,7 +521,8 @@ def _dispatch_command(command_text: str, history_text: str, session_id: str | No
 
     if command == "/recommend":
         if argument:
-            sources = rag_engine.search_articles(argument, mode="smart", page=1, page_size=5, language=language)["items"]
+            retrieval = _public_retrieval(argument, language=language, page_size=5)
+            sources = retrieval["sources"]
             recommendation_mode = "topic"
         else:
             recommendation_payload = get_recommended_articles(session_id, limit=5, language=language)
@@ -486,17 +575,16 @@ def chat(request: ChatRequest):
         follow_up_questions = command_payload["follow_up_questions"]
         confidence = command_payload["confidence"]
     else:
-        search_payload = rag_engine.search_articles(
+        retrieval = _public_retrieval(
             latest_question,
-            mode="smart",
-            page=1,
-            page_size=5,
             language=response_language,
+            page_size=5,
         )
-        sources = search_payload["items"]
-        answer = _answer_from_sources(
+        sources = retrieval["sources"]
+        answer = _answer_from_context(
             latest_question,
             history_text,
+            retrieval["context_blocks"],
             sources,
             latest_question,
             response_language,
@@ -504,6 +592,7 @@ def chat(request: ChatRequest):
         follow_up_questions = _build_follow_ups(latest_question, sources, response_language)
         confidence = min(1.0, (sources[0]["score"] / 12) if sources and sources[0].get("score") else 0.45)
 
+    answer = normalize_chat_answer_markdown(answer)
     default_title = _copy(response_language, "\u65b0\u4f1a\u8bdd", "New session")
     title = latest_question[:40] or default_title
     store_chat_session(session_id, title, latest_question)

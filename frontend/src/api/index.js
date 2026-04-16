@@ -97,6 +97,16 @@ export function fetchAdminContentOperations(authToken = '') {
   })
 }
 
+export function fetchAdminRagOverview(authToken = '', assetLimit = 12, jobLimit = 12, eventLimit = 8) {
+  const params = new URLSearchParams()
+  params.set('asset_limit', String(assetLimit))
+  params.set('job_limit', String(jobLimit))
+  params.set('event_limit', String(eventLimit))
+  return request(`/admin/rag?${params.toString()}`, {
+    authToken,
+  })
+}
+
 export function fetchAdminContentCandidates(entityType, query = '', limit = 12, authToken = '') {
   const params = new URLSearchParams()
   params.set('entity_type', entityType)
@@ -134,9 +144,13 @@ export function fetchDemoRequests(limit = 50) {
   return request(`/commerce/demo-requests?limit=${limit}`)
 }
 
-export function fetchEditorialArticles(limit = 40, status = '') {
-  const suffix = status ? `&status=${encodeURIComponent(status)}` : ''
-  return request(`/editorial/articles?limit=${limit}${suffix}`)
+export function fetchEditorialArticles(limit = 40, status = '', workflowStatus = '', draftBoxState = 'active') {
+  const params = new URLSearchParams()
+  params.set('limit', String(limit))
+  if (status) params.set('status', status)
+  if (workflowStatus) params.set('workflow_status', workflowStatus)
+  if (draftBoxState) params.set('draft_box_state', draftBoxState)
+  return request(`/editorial/articles?${params.toString()}`)
 }
 
 export function fetchEditorialSourceArticles(query = '', limit = 12) {
@@ -205,6 +219,12 @@ export function autoFormatEditorialArticle(id, payload) {
 
 export function autoSummarizeEditorialArticle(id) {
   return request(`/editorial/articles/${id}/auto-summary`, {
+    method: 'POST',
+  })
+}
+
+export function autoTranslateEditorialArticle(id) {
+  return request(`/editorial/articles/${id}/auto-translate`, {
     method: 'POST',
   })
 }
@@ -419,6 +439,12 @@ export function fetchMediaHub(kind, authToken = '', limit = 24) {
   })
 }
 
+export function fetchMediaItemDetail(kind, slug, authToken = '') {
+  return request(`/media/${encodeURIComponent(kind)}/${encodeURIComponent(slug)}`, {
+    authToken,
+  })
+}
+
 export function fetchMediaAdminItems(kind = '', status = '', limit = 60, workflowStatus = '', draftBoxState = 'active') {
   const params = new URLSearchParams()
   params.set('limit', String(limit))
@@ -427,14 +453,6 @@ export function fetchMediaAdminItems(kind = '', status = '', limit = 60, workflo
   if (workflowStatus) params.set('workflow_status', workflowStatus)
   if (draftBoxState) params.set('draft_box_state', draftBoxState)
   return request(`/media/admin/items?${params.toString()}`)
-}
-
-export function fetchMediaAdminSourceItems(kind = '', query = '', limit = 24) {
-  const params = new URLSearchParams()
-  params.set('limit', String(limit))
-  if (kind) params.set('kind', kind)
-  if (query) params.set('query', query)
-  return request(`/media/admin/source-items?${params.toString()}`)
 }
 
 export function fetchMediaAdminItem(id) {
@@ -467,15 +485,22 @@ export function generateMediaAdminCopy(id) {
   })
 }
 
+export function rewriteMediaAdminChapters(id) {
+  return request(`/media/admin/items/${id}/rewrite-chapters`, {
+    method: 'POST',
+  })
+}
+
 export function publishMediaAdminItem(id) {
   return request(`/media/admin/items/${id}/publish`, {
     method: 'POST',
   })
 }
 
-export function reopenMediaAdminSourceItem(mediaItemId) {
-  return request(`/media/admin/source-items/${mediaItemId}/reopen-draft`, {
+export function editPublishedMediaItem(mediaItemId, authToken = '') {
+  return request(`/media/admin/published-items/${mediaItemId}/edit-draft`, {
     method: 'POST',
+    authToken,
   })
 }
 
@@ -518,6 +543,67 @@ export function fetchAdminBillingOrders(authToken = '', limit = 100, query = '')
 
 export function fetchMyLibrary(authToken = '', limit = 12) {
   return request(`/me/library?limit=${limit}`, {
+    authToken,
+  })
+}
+
+export function fetchMyKnowledgeThemes(authToken = '', articleId = null) {
+  const params = new URLSearchParams()
+  if (Number.isFinite(articleId) && Number(articleId) > 0) params.set('article_id', String(Number(articleId)))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  return request(`/me/knowledge/themes${suffix}`, {
+    authToken,
+  })
+}
+
+export function createMyKnowledgeTheme(payload, authToken = '') {
+  return request('/me/knowledge/themes', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+    authToken,
+  })
+}
+
+export function fetchMyKnowledgeThemeDetail(slug, authToken = '', page = 1, pageSize = 24) {
+  return request(`/me/knowledge/themes/${encodeURIComponent(slug)}?page=${page}&page_size=${pageSize}`, {
+    authToken,
+  })
+}
+
+export function updateMyKnowledgeTheme(slug, payload, authToken = '') {
+  return request(`/me/knowledge/themes/${encodeURIComponent(slug)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+    authToken,
+  })
+}
+
+export function deleteMyKnowledgeTheme(slug, authToken = '') {
+  return request(`/me/knowledge/themes/${encodeURIComponent(slug)}`, {
+    method: 'DELETE',
+    authToken,
+  })
+}
+
+export function addArticleToMyKnowledgeTheme(themeId, articleId, authToken = '') {
+  return request(`/me/knowledge/themes/${encodeURIComponent(themeId)}/articles`, {
+    method: 'POST',
+    body: JSON.stringify({ article_id: articleId }),
+    authToken,
+  })
+}
+
+export function removeArticleFromMyKnowledgeTheme(themeId, articleId, authToken = '') {
+  return request(`/me/knowledge/themes/${encodeURIComponent(themeId)}/articles/${encodeURIComponent(articleId)}`, {
+    method: 'DELETE',
+    authToken,
+  })
+}
+
+export function chatWithMyKnowledgeTheme(slug, payload, authToken = '') {
+  return request(`/me/knowledge/themes/${encodeURIComponent(slug)}/chat`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
     authToken,
   })
 }

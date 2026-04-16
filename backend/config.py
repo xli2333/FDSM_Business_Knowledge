@@ -12,6 +12,7 @@ DATA_DIR = Path(os.getenv("FDSM_DATA_DIR", BASE_DIR))
 BUSINESS_DATA_DIR = DATA_DIR / "Fudan_Business_Knowledge_Data"
 SQLITE_DB_PATH = DATA_DIR / "fudan_knowledge_base.db"
 FAISS_DB_DIR = DATA_DIR / "faiss_index_business"
+RAG_LOCAL_INDEX_DIR = DATA_DIR / "rag_chunk_index"
 LEGACY_ARCHIVE_DIR = DATA_DIR / "archive" / "legacy_pre_knowledge_base"
 LEGACY_FAISS_DB_DIR = LEGACY_ARCHIVE_DIR / "indexes" / "faiss_index"
 UPLOADS_DIR = DATA_DIR / "uploads"
@@ -35,6 +36,15 @@ GEMINI_EDITORIAL_FORMAT_MODEL = "gemini-3-flash-preview"
 GEMINI_RUNTIME_MODEL_ALIASES = {
     "gemini-3-flash": "gemini-3-flash-preview",
 }
+RAG_SEARCH_PROVIDER = os.getenv("RAG_SEARCH_PROVIDER", "local_chunk").strip().lower() or "local_chunk"
+RAG_ENABLE_INLINE_INGESTION = os.getenv("RAG_ENABLE_INLINE_INGESTION", "1").strip() != "0"
+RAG_CHUNK_EMBEDDINGS_ENABLED = os.getenv("RAG_CHUNK_EMBEDDINGS_ENABLED", "1").strip() != "0"
+RAG_CHUNK_CHAR_LIMIT = max(400, int(os.getenv("RAG_CHUNK_CHAR_LIMIT", "900")))
+RAG_CHUNK_OVERLAP = max(0, int(os.getenv("RAG_CHUNK_OVERLAP", "120")))
+RAG_RETRIEVAL_CANDIDATE_LIMIT = max(8, int(os.getenv("RAG_RETRIEVAL_CANDIDATE_LIMIT", "48")))
+ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "").strip().rstrip("/")
+ELASTICSEARCH_API_KEY = os.getenv("ELASTICSEARCH_API_KEY", "").strip()
+ELASTICSEARCH_INDEX_PREFIX = os.getenv("ELASTICSEARCH_INDEX_PREFIX", "fdsm-rag").strip() or "fdsm-rag"
 
 
 def resolve_gemini_model_name(model_name: str) -> str:

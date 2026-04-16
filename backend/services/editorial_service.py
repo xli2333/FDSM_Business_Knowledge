@@ -14,6 +14,7 @@ from fastapi import HTTPException, UploadFile
 
 from backend.config import COLUMN_DEFINITIONS, EDITORIAL_UPLOADS_DIR
 from backend.database import connection_scope, ensure_runtime_tables
+from backend.services.article_asset_service import upsert_article_translation
 from backend.services.article_ai_output_service import (
     build_current_article_source_hash,
     fetch_latest_article_ai_output_row,
@@ -29,6 +30,7 @@ from backend.services.fudan_wechat_renderer import (
 )
 from backend.services.display_markdown_service import normalize_summary_display_markdown
 from backend.services.html_renderer import strip_markdown
+from backend.services.knowledge_ingestion_service import get_article_rag_status, sync_article_for_rag
 from backend.services.membership_service import access_level_label, normalize_access_level
 from backend.services.rag_engine import refresh_search_cache
 from backend.services.summary_preview_service import is_summary_preview_html, render_summary_preview_html
@@ -337,6 +339,31 @@ def _serialize_editorial_row(row) -> dict:
         str((row["manual_summary_html_backup"] if "manual_summary_html_backup" in row.keys() else None) or "").strip()
         or None
     )
+    translation_title_en = str((row["translation_title_en"] if "translation_title_en" in row.keys() else None) or "").strip() or None
+    translation_excerpt_en = str((row["translation_excerpt_en"] if "translation_excerpt_en" in row.keys() else None) or "").strip() or None
+    translation_summary_en = (
+        normalize_summary_display_markdown(row["translation_summary_en"], "en").strip()
+        if "translation_summary_en" in row.keys() and row["translation_summary_en"]
+        else None
+    ) or None
+    raw_summary_html_en = (
+        row["summary_html_en"]
+        if "summary_html_en" in row.keys() and row["summary_html_en"]
+        else render_summary_preview_html(translation_summary_en, language="en")
+    )
+    summary_html_en = str(raw_summary_html_en or "").strip() or None
+    published_summary_html_en = (
+        str((row["published_summary_html_en"] if "published_summary_html_en" in row.keys() else None) or "").strip()
+        or summary_html_en
+        if row["status"] == "published"
+        else str((row["published_summary_html_en"] if "published_summary_html_en" in row.keys() else None) or "").strip() or None
+    )
+    translation_summary_editor_document = _load_editor_document(
+        row["translation_summary_editor_document_json"] if "translation_summary_editor_document_json" in row.keys() else None
+    )
+    if not translation_summary_editor_document and summary_html_en:
+        translation_summary_editor_document = _build_editor_document_payload(summary_html_en)
+    translation_content_en = str((row["translation_content_en"] if "translation_content_en" in row.keys() else None) or "").strip() or None
     raw_final_html = (
         row["final_html"]
         if "final_html" in row.keys() and row["final_html"]
@@ -362,6 +389,40 @@ def _serialize_editorial_row(row) -> dict:
         editor_source = EDITOR_SOURCE_IMPORTED
     html_web = str((row["html_web"] or final_html or row["html_wechat"] or "").strip() or "") or None
     html_wechat = str((row["html_wechat"] or final_html or row["html_web"] or "").strip() or "") or None
+    raw_final_html_en = (
+        row["final_html_en"]
+        if "final_html_en" in row.keys() and row["final_html_en"]
+        else (
+            row["published_final_html_en"]
+            if "published_final_html_en" in row.keys() and row["published_final_html_en"]
+            else row["html_web_en"] or row["html_wechat_en"] or ""
+        )
+    )
+    final_html_en = str(raw_final_html_en or "").strip() or None
+    published_final_html_en = (
+        str((row["published_final_html_en"] if "published_final_html_en" in row.keys() else None) or "").strip() or None
+    )
+    if not summary_html_en:
+        fallback_translation_summary_en, fallback_summary_html_en = _derive_english_summary_from_final_html(
+            final_html_en or published_final_html_en
+        )
+        if fallback_summary_html_en:
+            summary_html_en = fallback_summary_html_en
+        if not translation_summary_en and fallback_translation_summary_en:
+            translation_summary_en = fallback_translation_summary_en
+    if row["status"] == "published" and not published_summary_html_en and summary_html_en:
+        published_summary_html_en = summary_html_en
+    translation_editor_document = _load_editor_document(
+        row["translation_editor_document_json"] if "translation_editor_document_json" in row.keys() else None
+    )
+    if not translation_editor_document and final_html_en:
+        translation_editor_document = _build_editor_document_payload(final_html_en)
+    html_web_en = str((row["html_web_en"] or final_html_en or row["html_wechat_en"] or "").strip() or "") or None
+    html_wechat_en = str((row["html_wechat_en"] or final_html_en or row["html_web_en"] or "").strip() or "") or None
+    translation_status = _normalize_translation_status(row["translation_status"] if "translation_status" in row.keys() else None)
+    translation_error = str((row["translation_error"] if "translation_error" in row.keys() else None) or "").strip() or None
+    translation_model = str((row["translation_model"] if "translation_model" in row.keys() else None) or "").strip() or None
+    translation_updated_at = str((row["translation_updated_at"] if "translation_updated_at" in row.keys() else None) or "").strip() or None
     publish_validation = _load_validation_payload(
         row["publish_validation_json"] if "publish_validation_json" in row.keys() else None
     )
@@ -379,6 +440,17 @@ def _serialize_editorial_row(row) -> dict:
         and (
             summary_html != published_summary_html
             or (published_at and summary_updated_at and summary_updated_at > published_at)
+        )
+    )
+    translation_has_unpublished_changes = bool(
+        published_final_html_en
+        and (
+            final_html_en != published_final_html_en
+            or (published_at and translation_updated_at and translation_updated_at > published_at)
+            or (
+                published_summary_html_en
+                and summary_html_en != published_summary_html_en
+            )
         )
     )
     is_reopened_from_published = bool(row["status"] == "published" and workflow_status != "published")
@@ -422,8 +494,15 @@ def _serialize_editorial_row(row) -> dict:
         "summary_has_unpublished_changes": summary_has_unpublished_changes,
         "manual_summary_html_backup": manual_summary_html_backup,
         "has_summary_backup": bool(manual_summary_html_backup),
+        "translation_title_en": translation_title_en,
+        "translation_excerpt_en": translation_excerpt_en,
+        "translation_summary_en": translation_summary_en,
+        "summary_html_en": summary_html_en,
+        "published_summary_html_en": published_summary_html_en,
+        "translation_summary_editor_document": translation_summary_editor_document,
         "content_markdown": row["content_markdown"],
         "plain_text_content": row["plain_text_content"],
+        "translation_content_en": translation_content_en,
         "excerpt": row["excerpt"],
         "tags": tags,
         "ai_tags": ai_tags,
@@ -441,6 +520,22 @@ def _serialize_editorial_row(row) -> dict:
         "is_manual_edit": editor_source == EDITOR_SOURCE_MANUAL,
         "manual_final_html_backup": manual_final_html_backup,
         "has_manual_backup": bool(manual_final_html_backup),
+        "final_html_en": final_html_en,
+        "published_final_html_en": published_final_html_en,
+        "html_web_en": html_web_en,
+        "html_wechat_en": html_wechat_en,
+        "translation_editor_document": translation_editor_document,
+        "translation_status": translation_status,
+        "translation_error": translation_error,
+        "translation_model": translation_model,
+        "translation_updated_at": translation_updated_at,
+        "translation_ready": _editorial_translation_ready(
+            {
+                "translation_content_en": translation_content_en,
+                "translation_status": translation_status,
+            }
+        ),
+        "translation_has_unpublished_changes": translation_has_unpublished_changes,
         "render_metadata": _load_render_metadata(row["render_metadata_json"] if "render_metadata_json" in row.keys() else None),
         "publish_validation": publish_validation or _build_publish_validation(
             {
@@ -756,12 +851,310 @@ def _render_editorial_preview(article: dict[str, Any]) -> tuple[str, dict[str, A
     return final_html, _render_metadata_payload(rendered)
 
 
+def _normalize_translation_status(value: str | None) -> str:
+    status = str(value or "").strip().lower() or "pending"
+    if status not in {"pending", "running", "completed", "failed"}:
+        return "pending"
+    return status
+
+
+def _editorial_translation_ready(payload: dict[str, Any] | Any) -> bool:
+    translated_content = str(payload.get("translation_content_en") or "").strip() if isinstance(payload, dict) else str(payload or "").strip()
+    status = _normalize_translation_status(payload.get("translation_status") if isinstance(payload, dict) else None)
+    return bool(translated_content) and status == "completed"
+
+
+def _build_editorial_translation_render_input(article: dict[str, Any], translated: dict[str, str]) -> dict[str, Any]:
+    render_metadata = (
+        _load_render_metadata(article.get("render_metadata_json"))
+        if isinstance(article.get("render_metadata_json"), str)
+        else article.get("render_metadata")
+        if isinstance(article.get("render_metadata"), dict)
+        else {}
+    )
+    render_plan = render_metadata.get("render_plan") if isinstance(render_metadata, dict) else None
+    return build_fudan_render_item(
+        title=translated.get("title") or article.get("title") or "",
+        content_markdown=translated.get("content") or "",
+        summary=translated.get("excerpt") or strip_markdown(translated.get("summary") or ""),
+        source_url=article.get("source_url"),
+        author=article.get("author") or "",
+        editor=article.get("organization") or "",
+        opening_highlight_mode="smart_lead",
+        omit_credits=False,
+        render_plan=render_plan if isinstance(render_plan, dict) and render_plan else None,
+    )
+
+
+def _render_translated_editorial_html(article: dict[str, Any], translated: dict[str, str]) -> str:
+    try:
+        rendered = render_fudan_wechat(_build_editorial_translation_render_input(article, translated))
+    except FudanWechatRenderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    final_html = str(rendered.get("previewHtml") or rendered.get("contentHtml") or "").strip()
+    if not final_html:
+        raise HTTPException(status_code=502, detail="Rendered English HTML is empty")
+    return final_html
+
+
+def _build_editorial_translation_assets(article: dict[str, Any]) -> dict[str, Any]:
+    chinese_summary = str(article.get("summary_markdown") or "").strip() or _html_to_plain_text(article.get("summary_html")) or ""
+    chinese_content = str(article.get("content_markdown") or "").strip() or _html_to_plain_text(article.get("final_html") or article.get("html_web")) or ""
+    if not chinese_summary:
+        raise HTTPException(status_code=400, detail="请先生成中文摘要，再执行英文翻译。")
+    if not chinese_content:
+        raise HTTPException(status_code=400, detail="请先生成中文正文成品，再执行英文翻译。")
+
+    translated = ai_service.translate_editorial_assets_to_english(
+        article.get("title") or "",
+        article.get("excerpt") or article.get("main_topic") or "",
+        chinese_summary,
+        chinese_content,
+    )
+    translated_summary = normalize_summary_display_markdown(translated.get("summary") or "", "en").strip()
+    translated_content = str(translated.get("content") or "").strip()
+    if not translated_summary:
+        raise HTTPException(status_code=502, detail="AI 英文摘要为空。")
+    if not translated_content:
+        raise HTTPException(status_code=502, detail="AI 英文正文为空。")
+
+    summary_html_en = render_summary_preview_html(translated_summary, language="en")
+    final_html_en = _render_translated_editorial_html(
+        {
+            **article,
+            "render_metadata": _load_render_metadata(article.get("render_metadata_json"))
+            if isinstance(article.get("render_metadata_json"), str)
+            else article.get("render_metadata"),
+        },
+        {
+            **translated,
+            "summary": translated_summary,
+            "content": translated_content,
+        },
+    )
+    timestamp = _now_iso()
+    return {
+        "translation_title_en": str(translated.get("title") or "").strip() or article.get("title") or "",
+        "translation_excerpt_en": str(translated.get("excerpt") or "").strip() or _extract_excerpt(strip_markdown(translated_summary), limit=220),
+        "translation_summary_en": translated_summary,
+        "summary_html_en": str(summary_html_en or "").strip() or None,
+        "translation_summary_editor_document_json": json.dumps(
+            _build_editor_document_payload(summary_html_en),
+            ensure_ascii=False,
+        )
+        if summary_html_en
+        else "{}",
+        "translation_content_en": translated_content,
+        "final_html_en": final_html_en,
+        "published_final_html_en": article.get("published_final_html_en"),
+        "translation_editor_document_json": json.dumps(
+            _build_editor_document_payload(final_html_en),
+            ensure_ascii=False,
+        ),
+        "html_web_en": final_html_en,
+        "html_wechat_en": final_html_en,
+        "translation_status": "completed",
+        "translation_error": None,
+        "translation_model": translated.get("model") or ai_service.GEMINI_FLASH_MODEL,
+        "translation_updated_at": timestamp,
+    }
+
+
+def _clear_editorial_translation_assets(current: dict[str, Any]) -> None:
+    current["translation_title_en"] = None
+    current["translation_excerpt_en"] = None
+    current["translation_summary_en"] = None
+    current["summary_html_en"] = None
+    current["translation_summary_editor_document_json"] = "{}"
+    current["translation_content_en"] = None
+    current["final_html_en"] = None
+    current["html_web_en"] = None
+    current["html_wechat_en"] = None
+    current["translation_status"] = "pending"
+    current["translation_error"] = None
+    current["translation_model"] = None
+    current["translation_updated_at"] = None
+
+
+def _persist_published_article_translation_snapshot(
+    connection,
+    *,
+    article_id: int,
+    translated: dict[str, str],
+    summary_html_en: str | None,
+    final_html_en: str | None,
+    timestamp: str,
+) -> None:
+    article_row = connection.execute(
+        """
+        SELECT
+            id,
+            doc_id,
+            slug,
+            relative_path,
+            title,
+            excerpt,
+            main_topic,
+            content,
+            access_level
+        FROM articles
+        WHERE id = ?
+        """,
+        (article_id,),
+    ).fetchone()
+    if article_row is None:
+        raise HTTPException(status_code=404, detail="Published article not found while writing English assets")
+
+    source_hash = build_current_article_source_hash(article_row)
+    upsert_article_translation(
+        connection,
+        article_id=article_id,
+        language="en",
+        source_hash=source_hash,
+        translated=translated,
+        timestamp=timestamp,
+    )
+
+    existing = connection.execute(
+        """
+        SELECT *
+        FROM article_ai_outputs
+        WHERE article_id = ? AND source_hash = ?
+        """,
+        (article_id, source_hash),
+    ).fetchone()
+    created_at = str((existing["created_at"] if existing is not None else None) or timestamp)
+    worker_name = str((existing["worker_name"] if existing is not None else None) or "editorial_publish")
+    started_at = str((existing["started_at"] if existing is not None else None) or timestamp)
+    summary_status = str((existing["summary_status"] if existing is not None else None) or "pending")
+    format_status = str((existing["format_status"] if existing is not None else None) or "pending")
+    summary_error = str((existing["summary_error"] if existing is not None else None) or "").strip() or None
+    format_error = str((existing["format_error"] if existing is not None else None) or "").strip() or None
+    summary_zh = str((existing["summary_zh"] if existing is not None else None) or "").strip() or None
+    summary_html_zh = str((existing["summary_html_zh"] if existing is not None else None) or "").strip() or None
+    summary_model = str((existing["summary_model"] if existing is not None else None) or "").strip() or None
+    formatted_markdown_zh = str((existing["formatted_markdown_zh"] if existing is not None else None) or "").strip() or None
+    html_web_zh = str((existing["html_web_zh"] if existing is not None else None) or "").strip() or None
+    html_wechat_zh = str((existing["html_wechat_zh"] if existing is not None else None) or "").strip() or None
+    format_model = str((existing["format_model"] if existing is not None else None) or "").strip() or None
+    format_template = str((existing["format_template"] if existing is not None else None) or "fudan-business-knowledge-v1")
+
+    connection.execute(
+        """
+        INSERT INTO article_ai_outputs (
+            article_id, doc_id, slug, relative_path, source_hash, source_lang, target_lang, source_title, source_excerpt,
+            summary_zh, summary_html_zh, summary_model, formatted_markdown_zh, formatted_markdown_en,
+            translation_title_en, translation_excerpt_en, translation_summary_en, summary_html_en, translation_content_en,
+            html_web_zh, html_wechat_zh, html_web_en, html_wechat_en,
+            summary_status, format_status, translation_status,
+            summary_error, format_error, translation_error,
+            translation_model, format_model, format_template,
+            status, error_message, worker_name, started_at, completed_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, 'zh-CN', 'en', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, NULL, ?, ?, ?, 'completed', NULL, ?, ?, ?, ?, ?)
+        ON CONFLICT(article_id, source_hash) DO UPDATE SET
+            doc_id = excluded.doc_id,
+            slug = excluded.slug,
+            relative_path = excluded.relative_path,
+            source_title = excluded.source_title,
+            source_excerpt = excluded.source_excerpt,
+            formatted_markdown_en = excluded.formatted_markdown_en,
+            translation_title_en = excluded.translation_title_en,
+            translation_excerpt_en = excluded.translation_excerpt_en,
+            translation_summary_en = excluded.translation_summary_en,
+            summary_html_en = excluded.summary_html_en,
+            translation_content_en = excluded.translation_content_en,
+            html_web_en = excluded.html_web_en,
+            html_wechat_en = excluded.html_wechat_en,
+            translation_status = excluded.translation_status,
+            translation_error = excluded.translation_error,
+            translation_model = excluded.translation_model,
+            status = excluded.status,
+            error_message = excluded.error_message,
+            worker_name = excluded.worker_name,
+            started_at = excluded.started_at,
+            completed_at = excluded.completed_at,
+            updated_at = excluded.updated_at
+        """,
+        (
+            article_id,
+            article_row["doc_id"],
+            article_row["slug"],
+            article_row["relative_path"],
+            source_hash,
+            article_row["title"],
+            article_row["excerpt"] or article_row["main_topic"] or "",
+            summary_zh,
+            summary_html_zh,
+            summary_model,
+            formatted_markdown_zh,
+            translated["content"],
+            translated["title"],
+            translated.get("excerpt") or "",
+            translated["summary"],
+            summary_html_en,
+            translated["content"],
+            html_web_zh,
+            html_wechat_zh,
+            final_html_en,
+            final_html_en,
+            summary_status,
+            format_status,
+            summary_error,
+            format_error,
+            translated["model"],
+            format_model,
+            format_template,
+            worker_name,
+            started_at,
+            timestamp,
+            created_at,
+            timestamp,
+        ),
+    )
+
+
 def _extract_body_html(raw_html: str | None) -> str:
     html_value = str(raw_html or "").strip()
     if not html_value:
         return ""
     match = re.search(r"<body[^>]*>(?P<body>[\s\S]*?)</body>", html_value, flags=re.I)
     return match.group("body") if match else html_value
+
+
+def _derive_english_summary_from_final_html(raw_html: str | None) -> tuple[str | None, str | None]:
+    body_html = _extract_body_html(raw_html)
+    if not body_html:
+        return None, None
+
+    block_pattern = re.compile(
+        r"(?is)<(?P<tag>h[1-6]|p|blockquote|ul|ol|table)\b[^>]*>.*?</(?P=tag)>|<hr\b[^>]*\/?>"
+    )
+    collected: list[str] = []
+    seen_title = False
+
+    for match in block_pattern.finditer(body_html):
+        block_html = match.group(0).strip()
+        tag = (match.group("tag") or "hr").lower()
+        if tag == "h1" and not seen_title:
+            seen_title = True
+            continue
+        if tag in {"h2", "h3", "h4", "h5", "h6", "hr"}:
+            if collected:
+                break
+            continue
+        if tag in {"p", "blockquote", "ul", "ol", "table"}:
+            collected.append(block_html)
+            if len(collected) >= 2:
+                break
+
+    summary_html = "".join(collected).strip() or None
+    if not summary_html:
+        return None, None
+
+    summary_text = normalize_summary_display_markdown(_html_to_plain_text(summary_html), "en").strip() or None
+    return summary_text, summary_html
 
 
 def _should_rebuild_legacy_wechat_preview(raw_html: str | None, title: str | None) -> bool:
@@ -885,6 +1278,23 @@ def get_editorial_article(editorial_id: int) -> dict:
         payload["source_article_ai"] = get_article_ai_output_detail(int(payload["source_article_id"]))
     else:
         payload["source_article_ai"] = None
+    if payload.get("article_id"):
+        payload["rag_status"] = get_article_rag_status(int(payload["article_id"]))
+    else:
+        payload["rag_status"] = {
+            "article_id": None,
+            "version_exists": False,
+            "in_knowledge_base": False,
+            "current_version_status": None,
+            "current_version": None,
+            "chunk_count": 0,
+            "embedding_count": 0,
+            "has_embeddings": False,
+            "embedding_dimensions": 0,
+            "embedding_provider": None,
+            "latest_job": None,
+            "last_error_message": None,
+        }
     return payload
 
 
@@ -903,8 +1313,10 @@ def delete_editorial_article(editorial_id: int) -> dict:
 
 def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
     timestamp = _now_iso()
+    editorial_id: int | None = None
     with connection_scope() as connection:
         source_row = _fetch_source_article_row(connection, article_id)
+        source_cover_image_url = str(source_row.get("cover_image_path") or "").strip() or None
         current_source_hash = build_current_article_source_hash(source_row)
         ai_row = fetch_latest_article_ai_output_row(connection, article_id, source_hash=current_source_hash)
         if ai_row is None:
@@ -931,13 +1343,33 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
         source_summary_html = str((ai_row["summary_html_zh"] if ai_row is not None else None) or "").strip()
         if not is_summary_preview_html(source_summary_html):
             source_summary_html = _build_summary_editorial_html(source_summary_markdown) or ""
+        source_translation_title_en = str((ai_row["translation_title_en"] if ai_row is not None else None) or "").strip() or None
+        source_translation_excerpt_en = str((ai_row["translation_excerpt_en"] if ai_row is not None else None) or "").strip() or None
+        source_translation_summary_en = (
+            normalize_summary_display_markdown((ai_row["translation_summary_en"] if ai_row is not None else None) or "", "en").strip()
+            or None
+        )
+        source_summary_html_en = str((ai_row["summary_html_en"] if ai_row is not None else None) or "").strip()
+        if not source_summary_html_en and source_translation_summary_en:
+            source_summary_html_en = render_summary_preview_html(source_translation_summary_en, language="en") or ""
+        source_translation_content_en = str((ai_row["translation_content_en"] if ai_row is not None else None) or "").strip() or None
+        source_final_html_en = str(
+            ((ai_row["html_wechat_en"] if ai_row is not None else None) or (ai_row["html_web_en"] if ai_row is not None else None) or "")
+        ).strip() or None
+        if not source_summary_html_en and source_final_html_en:
+            derived_translation_summary_en, derived_summary_html_en = _derive_english_summary_from_final_html(source_final_html_en)
+            if not source_translation_summary_en and derived_translation_summary_en:
+                source_translation_summary_en = derived_translation_summary_en
+            if derived_summary_html_en:
+                source_summary_html_en = derived_summary_html_en
         excerpt = _extract_excerpt(strip_markdown(source_summary_markdown) or plain_text_content, limit=180)
         existing_row = _fetch_latest_editorial_row_by_article_id(connection, article_id)
 
         if existing_row is not None:
             current = dict(existing_row)
-            ai_tags = _load_tag_payload(current.get("tag_suggestion_payload_json")) or tag_payload
-            selected_tags = _load_tag_payload(current.get("tag_payload_json")) or tag_payload
+            editorial_id = int(current["id"])
+            ai_tags = tag_payload or _load_tag_payload(current.get("tag_suggestion_payload_json"))
+            selected_tags = tag_payload or _load_tag_payload(current.get("tag_payload_json"))
             removed_tags = _compute_removed_tags(ai_tags, selected_tags)
             published_summary_html = str(current.get("published_summary_html") or "").strip() or source_summary_html
             working_summary_html = str(current.get("summary_html") or "").strip() or published_summary_html
@@ -953,6 +1385,8 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
                 str(current.get("final_html") or current.get("html_web") or current.get("html_wechat") or "").strip()
                 or published_final_html
             )
+            if str(source_row.get("title") or "").strip() and str(source_row.get("title") or "").strip() not in _extract_body_html(working_final_html):
+                working_final_html = published_final_html
             plain_text_content = _html_to_plain_text(working_final_html) or strip_markdown(
                 str(current.get("content_markdown") or content_markdown or source_markdown)
             )
@@ -960,6 +1394,7 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
             current_column_slug = _normalize_column_slug(current.get("primary_column_slug")) or column_slug
             current_source_markdown = str(current.get("source_markdown") or source_markdown or content_markdown).strip()
             current_content_markdown = str(current.get("content_markdown") or content_markdown or source_markdown).strip()
+            current_cover_image_url = str(current.get("cover_image_url") or source_cover_image_url or "").strip() or None
             current_summary_editor_document = _build_editor_document_payload(
                 working_summary_html,
                 _load_editor_document(current.get("summary_editor_document_json")),
@@ -967,6 +1402,30 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
             current_summary_updated_at = current.get("summary_updated_at")
             if working_summary_html == published_summary_html:
                 current_summary_updated_at = None
+            working_translation_title_en = str(current.get("translation_title_en") or source_translation_title_en or "").strip() or None
+            working_translation_excerpt_en = str(current.get("translation_excerpt_en") or source_translation_excerpt_en or "").strip() or None
+            working_translation_summary_en = (
+                normalize_summary_display_markdown(current.get("translation_summary_en") or source_translation_summary_en or "", "en").strip()
+                or None
+            )
+            published_summary_html_en = str(current.get("published_summary_html_en") or source_summary_html_en or "").strip() or None
+            working_summary_html_en = str(current.get("summary_html_en") or "").strip() or published_summary_html_en
+            current_translation_summary_editor_document = _build_editor_document_payload(
+                working_summary_html_en,
+                _load_editor_document(current.get("translation_summary_editor_document_json")),
+            )
+            working_translation_content_en = str(current.get("translation_content_en") or source_translation_content_en or "").strip() or None
+            published_final_html_en = str(current.get("published_final_html_en") or source_final_html_en or "").strip() or None
+            working_final_html_en = str(current.get("final_html_en") or current.get("html_web_en") or current.get("html_wechat_en") or "").strip() or published_final_html_en
+            current_translation_editor_document = _build_editor_document_payload(
+                working_final_html_en,
+                _load_editor_document(current.get("translation_editor_document_json")),
+            )
+            current_translation_status = (
+                "completed"
+                if working_translation_content_en and working_final_html_en
+                else _normalize_translation_status(current.get("translation_status"))
+            )
             current_editor_document = _build_editor_document_payload(
                 working_final_html,
                 _load_editor_document(current.get("editor_document_json")),
@@ -994,6 +1453,7 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
                     organization = ?,
                     publish_date = ?,
                     source_url = ?,
+                    cover_image_url = ?,
                     primary_column_slug = ?,
                     article_type = ?,
                     main_topic = ?,
@@ -1005,6 +1465,22 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
                     summary_editor_document_json = ?,
                     summary_model = ?,
                     summary_updated_at = ?,
+                    translation_title_en = ?,
+                    translation_excerpt_en = ?,
+                    translation_summary_en = ?,
+                    summary_html_en = ?,
+                    published_summary_html_en = ?,
+                    translation_summary_editor_document_json = ?,
+                    translation_content_en = ?,
+                    final_html_en = ?,
+                    published_final_html_en = ?,
+                    translation_editor_document_json = ?,
+                    html_web_en = ?,
+                    html_wechat_en = ?,
+                    translation_status = ?,
+                    translation_error = NULL,
+                    translation_model = COALESCE(translation_model, ?),
+                    translation_updated_at = COALESCE(translation_updated_at, ?),
                     content_markdown = ?,
                     plain_text_content = ?,
                     excerpt = ?,
@@ -1036,6 +1512,7 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
                     current.get("organization") or organization,
                     _normalize_publish_date(source_row.get("publish_date")),
                     source_row.get("link"),
+                    current_cover_image_url,
                     current_column_slug,
                     source_row.get("article_type"),
                     source_row.get("main_topic"),
@@ -1047,6 +1524,21 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
                     json.dumps(current_summary_editor_document, ensure_ascii=False),
                     current.get("summary_model"),
                     current_summary_updated_at,
+                    working_translation_title_en,
+                    working_translation_excerpt_en,
+                    working_translation_summary_en,
+                    working_summary_html_en or None,
+                    published_summary_html_en,
+                    json.dumps(current_translation_summary_editor_document, ensure_ascii=False),
+                    working_translation_content_en,
+                    working_final_html_en or None,
+                    published_final_html_en,
+                    json.dumps(current_translation_editor_document, ensure_ascii=False),
+                    working_final_html_en or None,
+                    working_final_html_en or None,
+                    current_translation_status,
+                    current.get("translation_model") or (ai_row["translation_model"] if ai_row is not None else None),
+                    current.get("translation_updated_at") or timestamp,
                     current_content_markdown,
                     plain_text_content,
                     excerpt,
@@ -1077,85 +1569,28 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
             ):
                 _replace_editorial_selected_topics(
                     connection,
-                    int(current["id"]),
+                    editorial_id,
                     [int(item["id"]) for item in source_topics],
                     manual=False,
                 )
             connection.commit()
-            return get_editorial_article(int(current["id"]))
-
-        selected_tags = tag_payload
-        summary_editor_document = _build_editor_document_payload(source_summary_html)
-        editor_document = _build_editor_document_payload(live_html)
-        validation_payload = _validation_payload_json(
-            {
-                "title": source_row["title"],
-                "source_markdown": source_markdown or content_markdown,
-                "content_markdown": content_markdown or source_markdown,
-                "tags": selected_tags,
-                "primary_column_slug": column_slug,
-                "final_html": live_html,
-            }
-        )
-        desired_slug = slugify((source_row.get("slug") or source_row["title"]).strip())[:80]
-        unique_slug = _unique_slug(connection, "editorial_articles", desired_slug)
-        connection.execute(
-            """
-            INSERT INTO editorial_articles (
-                article_id,
-                source_article_id,
-                slug,
-                title,
-                subtitle,
-                author,
-                organization,
-                publish_date,
-                source_url,
-                cover_image_url,
-                primary_column_slug,
-                article_type,
-                main_topic,
-                access_level,
-                source_markdown,
-                summary_markdown,
-                summary_html,
-                published_summary_html,
-                summary_editor_document_json,
-                summary_model,
-                summary_updated_at,
-                layout_mode,
-                formatting_notes,
-                formatter_model,
-                last_formatted_at,
-                content_markdown,
-                plain_text_content,
-                excerpt,
-                tag_suggestion_payload_json,
-                tag_payload_json,
-                removed_tag_payload_json,
-                primary_column_ai_slug,
-                primary_column_manual,
-                final_html,
-                published_final_html,
-                editor_document_json,
-                editor_source,
-                editor_updated_at,
-                manual_final_html_backup,
-                html_web,
-                html_wechat,
-                render_metadata_json,
-                publish_validation_json,
-                status,
-                draft_box_state,
-                workflow_status,
-                ai_synced_at,
-                created_at,
-                updated_at,
-                published_at
+        else:
+            selected_tags = tag_payload
+            summary_editor_document = _build_editor_document_payload(source_summary_html)
+            editor_document = _build_editor_document_payload(live_html)
+            validation_payload = _validation_payload_json(
+                {
+                    "title": source_row["title"],
+                    "source_markdown": source_markdown or content_markdown,
+                    "content_markdown": content_markdown or source_markdown,
+                    "tags": selected_tags,
+                    "primary_column_slug": column_slug,
+                    "final_html": live_html,
+                }
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
+            desired_slug = slugify((source_row.get("slug") or source_row["title"]).strip())[:80]
+            unique_slug = _unique_slug(connection, "editorial_articles", desired_slug)
+            insert_values = (
                 article_id,
                 article_id,
                 unique_slug,
@@ -1165,7 +1600,7 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
                 organization,
                 _normalize_publish_date(source_row.get("publish_date")),
                 source_row.get("link"),
-                None,
+                source_cover_image_url,
                 column_slug,
                 source_row.get("article_type"),
                 source_row.get("main_topic"),
@@ -1177,6 +1612,22 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
                 json.dumps(summary_editor_document, ensure_ascii=False),
                 "source_ai_output" if source_summary_html else None,
                 None,
+                source_translation_title_en,
+                source_translation_excerpt_en,
+                source_translation_summary_en,
+                source_summary_html_en or None,
+                source_summary_html_en or None,
+                json.dumps(_build_editor_document_payload(source_summary_html_en), ensure_ascii=False) if source_summary_html_en else "{}",
+                source_translation_content_en,
+                source_final_html_en,
+                source_final_html_en,
+                json.dumps(_build_editor_document_payload(source_final_html_en), ensure_ascii=False) if source_final_html_en else "{}",
+                source_final_html_en,
+                source_final_html_en,
+                "completed" if source_translation_content_en and source_final_html_en else "pending",
+                None,
+                ai_row["translation_model"] if ai_row is not None else None,
+                timestamp if source_translation_content_en else None,
                 "auto",
                 None,
                 formatter_model,
@@ -1206,17 +1657,93 @@ def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
                 timestamp,
                 timestamp,
                 timestamp,
-            ),
-        )
-        editorial_id = int(connection.execute("SELECT last_insert_rowid()").fetchone()[0])
-        if source_topics:
-            _replace_editorial_selected_topics(
-                connection,
-                editorial_id,
-                [int(item["id"]) for item in source_topics],
-                manual=False,
             )
-        connection.commit()
+            connection.execute(
+                f"""
+                INSERT INTO editorial_articles (
+                    article_id,
+                    source_article_id,
+                    slug,
+                    title,
+                    subtitle,
+                    author,
+                    organization,
+                    publish_date,
+                    source_url,
+                    cover_image_url,
+                    primary_column_slug,
+                    article_type,
+                    main_topic,
+                    access_level,
+                    source_markdown,
+                    summary_markdown,
+                    summary_html,
+                    published_summary_html,
+                    summary_editor_document_json,
+                    summary_model,
+                    summary_updated_at,
+                    translation_title_en,
+                    translation_excerpt_en,
+                    translation_summary_en,
+                    summary_html_en,
+                    published_summary_html_en,
+                    translation_summary_editor_document_json,
+                    translation_content_en,
+                    final_html_en,
+                    published_final_html_en,
+                    translation_editor_document_json,
+                    html_web_en,
+                    html_wechat_en,
+                    translation_status,
+                    translation_error,
+                    translation_model,
+                    translation_updated_at,
+                    layout_mode,
+                    formatting_notes,
+                    formatter_model,
+                    last_formatted_at,
+                    content_markdown,
+                    plain_text_content,
+                    excerpt,
+                    tag_suggestion_payload_json,
+                    tag_payload_json,
+                    removed_tag_payload_json,
+                    primary_column_ai_slug,
+                    primary_column_manual,
+                    final_html,
+                    published_final_html,
+                    editor_document_json,
+                    editor_source,
+                    editor_updated_at,
+                    manual_final_html_backup,
+                    html_web,
+                    html_wechat,
+                    render_metadata_json,
+                    publish_validation_json,
+                    status,
+                    draft_box_state,
+                    workflow_status,
+                    ai_synced_at,
+                    created_at,
+                    updated_at,
+                    published_at
+                )
+                VALUES ({", ".join("?" for _ in insert_values)})
+                """,
+                insert_values,
+            )
+            editorial_id = int(connection.execute("SELECT last_insert_rowid()").fetchone()[0])
+            if source_topics:
+                _replace_editorial_selected_topics(
+                    connection,
+                    editorial_id,
+                    [int(item["id"]) for item in source_topics],
+                    manual=False,
+                )
+            connection.commit()
+
+    if editorial_id is None:
+        raise HTTPException(status_code=500, detail="Failed to reopen the published article into the draft box")
     return get_editorial_article(editorial_id)
 
 
@@ -1295,6 +1822,7 @@ def _fetch_source_article_row(connection, article_id: int) -> dict:
             article_type,
             primary_org_name,
             access_level,
+            cover_image_path,
             content
         FROM articles
         WHERE id = ?
@@ -1518,12 +2046,14 @@ def _fetch_published_editorial_html(connection, article_id: int) -> str | None:
 def _resolve_source_article_live_html(connection, source_row: dict, ai_row) -> str:
     editorial_html = _fetch_published_editorial_html(connection, source_row["id"])
     if editorial_html:
-        return _sanitize_editor_html(editorial_html)
+        sanitized = _sanitize_editor_html(editorial_html)
+        if str(source_row.get("title") or "").strip() and str(source_row.get("title") or "").strip() in _extract_body_html(sanitized):
+            return sanitized
 
     if ai_row is not None:
         for field in ("html_wechat_zh", "html_web_zh"):
             candidate = _sanitize_editor_html(ai_row[field])
-            if candidate:
+            if candidate and str(source_row.get("title") or "").strip() in _extract_body_html(candidate):
                 return candidate
 
     fallback_text = str(
@@ -1827,6 +2357,19 @@ def create_editorial_article(payload: dict) -> dict:
     if not summary_html and summary_markdown:
         summary_html = _build_summary_editorial_html(summary_markdown) or ""
     summary_editor_document = _build_editor_document_payload(summary_html, payload.get("summary_editor_document"))
+    translation_title_en = str(payload.get("translation_title_en") or "").strip() or None
+    translation_excerpt_en = str(payload.get("translation_excerpt_en") or "").strip() or None
+    translation_summary_en = normalize_summary_display_markdown(payload.get("translation_summary_en") or "", "en").strip() or None
+    summary_html_en = _sanitize_editor_html(payload.get("summary_html_en"))
+    if not summary_html_en and translation_summary_en:
+        summary_html_en = render_summary_preview_html(translation_summary_en, language="en") or ""
+    translation_summary_editor_document = _build_editor_document_payload(
+        summary_html_en,
+        payload.get("translation_summary_editor_document"),
+    )
+    translation_content_en = str(payload.get("translation_content_en") or "").strip() or None
+    final_html_en = _sanitize_editor_html(payload.get("final_html_en"))
+    translation_editor_document = _build_editor_document_payload(final_html_en, payload.get("translation_editor_document"))
     final_html = _sanitize_editor_html(payload.get("final_html"))
     editor_document = _build_editor_document_payload(final_html, payload.get("editor_document"))
     editor_source = EDITOR_SOURCE_MANUAL if final_html else None
@@ -1862,68 +2405,88 @@ def create_editorial_article(payload: dict) -> dict:
     with connection_scope() as connection:
         desired_slug = slugify((payload.get("slug") or title).strip())[:80]
         unique_slug = _unique_slug(connection, "editorial_articles", desired_slug)
+        insert_values = (
+            unique_slug,
+            title,
+            payload.get("subtitle"),
+            payload.get("author"),
+            payload.get("organization"),
+            _normalize_publish_date(payload.get("publish_date")),
+            payload.get("source_url"),
+            payload.get("cover_image_url"),
+            primary_column_slug,
+            payload.get("article_type"),
+            payload.get("main_topic"),
+            access_level,
+            source_markdown,
+            summary_markdown or None,
+            summary_html or None,
+            None,
+            json.dumps(summary_editor_document, ensure_ascii=False),
+            None,
+            now if summary_html else None,
+            None,
+            translation_title_en,
+            translation_excerpt_en,
+            translation_summary_en,
+            summary_html_en or None,
+            None,
+            json.dumps(translation_summary_editor_document, ensure_ascii=False),
+            translation_content_en,
+            final_html_en or None,
+            None,
+            json.dumps(translation_editor_document, ensure_ascii=False),
+            final_html_en or None,
+            final_html_en or None,
+            "completed" if translation_content_en else "pending",
+            None,
+            payload.get("translation_model"),
+            now if translation_content_en else None,
+            layout_mode,
+            formatting_notes,
+            content_markdown,
+            plain_text_content,
+            excerpt,
+            json.dumps(selected_tags, ensure_ascii=False),
+            json.dumps(selected_tags, ensure_ascii=False),
+            "[]",
+            None,
+            1 if primary_column_manual else 0,
+            final_html or None,
+            None,
+            json.dumps(editor_document, ensure_ascii=False),
+            editor_source,
+            now if final_html else None,
+            None,
+            final_html or None,
+            final_html or None,
+            "{}",
+            json.dumps(validation_payload, ensure_ascii=False),
+            "draft",
+            DRAFT_BOX_STATE_ACTIVE,
+            "draft",
+            now,
+            now,
+        )
         connection.execute(
-            """
+            f"""
             INSERT INTO editorial_articles (
                 slug, title, subtitle, author, organization, publish_date, source_url,
                 cover_image_url, primary_column_slug, article_type, main_topic, access_level,
                 source_markdown, summary_markdown, summary_html, published_summary_html, summary_editor_document_json,
                 summary_model, summary_updated_at, manual_summary_html_backup,
+                translation_title_en, translation_excerpt_en, translation_summary_en, summary_html_en, published_summary_html_en,
+                translation_summary_editor_document_json, translation_content_en, final_html_en, published_final_html_en,
+                translation_editor_document_json, html_web_en, html_wechat_en, translation_status, translation_error, translation_model, translation_updated_at,
                 layout_mode, formatting_notes, content_markdown, plain_text_content, excerpt,
                 tag_suggestion_payload_json, tag_payload_json, removed_tag_payload_json, primary_column_ai_slug, primary_column_manual,
                 final_html, published_final_html, editor_document_json, editor_source, editor_updated_at, manual_final_html_backup,
                 html_web, html_wechat, render_metadata_json, publish_validation_json,
                 status, draft_box_state, workflow_status, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ({", ".join("?" for _ in insert_values)})
             """,
-            (
-                unique_slug,
-                title,
-                payload.get("subtitle"),
-                payload.get("author"),
-                payload.get("organization"),
-                _normalize_publish_date(payload.get("publish_date")),
-                payload.get("source_url"),
-                payload.get("cover_image_url"),
-                primary_column_slug,
-                payload.get("article_type"),
-                payload.get("main_topic"),
-                access_level,
-                source_markdown,
-                summary_markdown or None,
-                summary_html or None,
-                None,
-                json.dumps(summary_editor_document, ensure_ascii=False),
-                None,
-                now if summary_html else None,
-                None,
-                layout_mode,
-                formatting_notes,
-                content_markdown,
-                plain_text_content,
-                excerpt,
-                json.dumps(selected_tags, ensure_ascii=False),
-                json.dumps(selected_tags, ensure_ascii=False),
-                "[]",
-                None,
-                1 if primary_column_manual else 0,
-                final_html or None,
-                None,
-                json.dumps(editor_document, ensure_ascii=False),
-                editor_source,
-                now if final_html else None,
-                None,
-                final_html or None,
-                final_html or None,
-                "{}",
-                json.dumps(validation_payload, ensure_ascii=False),
-                "draft",
-                DRAFT_BOX_STATE_ACTIVE,
-                "draft",
-                now,
-                now,
-            ),
+            insert_values,
         )
         editorial_id = connection.execute("SELECT last_insert_rowid()").fetchone()[0]
         if payload.get("selected_topic_ids") is not None:
@@ -1957,6 +2520,14 @@ def update_editorial_article(editorial_id: int, payload: dict) -> dict:
         "summary_editor_document",
         "final_html",
         "editor_document",
+        "translation_title_en",
+        "translation_excerpt_en",
+        "translation_summary_en",
+        "summary_html_en",
+        "translation_summary_editor_document",
+        "translation_content_en",
+        "final_html_en",
+        "translation_editor_document",
     }
     updates = {key: value for key, value in payload.items() if key in allowed_fields and value is not None}
     if not updates and payload.get("slug") is None:
@@ -1975,11 +2546,28 @@ def update_editorial_article(editorial_id: int, payload: dict) -> dict:
             raise HTTPException(status_code=400, detail="Summary HTML cannot be empty")
         if "final_html" in updates and not str(updates["final_html"]).strip():
             raise HTTPException(status_code=400, detail="Final HTML cannot be empty")
+        if "summary_html_en" in updates and not str(updates["summary_html_en"]).strip():
+            raise HTTPException(status_code=400, detail="English summary HTML cannot be empty")
+        if "final_html_en" in updates and not str(updates["final_html_en"]).strip():
+            raise HTTPException(status_code=400, detail="English final HTML cannot be empty")
 
         ai_tags = _load_tag_payload(current.get("tag_suggestion_payload_json"))
         selected_tags = _load_tag_payload(current.get("tag_payload_json"))
         manual_summary_update = "summary_html" in updates or "summary_editor_document" in updates
         manual_editor_update = "final_html" in updates or "editor_document" in updates
+        english_fields = {
+            "translation_title_en",
+            "translation_excerpt_en",
+            "translation_summary_en",
+            "summary_html_en",
+            "translation_summary_editor_document",
+            "translation_content_en",
+            "final_html_en",
+            "translation_editor_document",
+        }
+        manual_translation_summary_update = "summary_html_en" in updates or "translation_summary_editor_document" in updates
+        manual_translation_editor_update = "final_html_en" in updates or "translation_editor_document" in updates
+        english_update_requested = any(field in updates for field in english_fields)
         previous_summary_html = str(current.get("summary_html") or "").strip()
         previous_final_html = str(current.get("final_html") or current.get("html_web") or current.get("html_wechat") or "").strip()
         desired_slug = payload.get("slug")
@@ -2000,6 +2588,14 @@ def update_editorial_article(editorial_id: int, payload: dict) -> dict:
         current["content_markdown"] = str(current.get("content_markdown") or current.get("source_markdown") or "").strip()
         current["plain_text_content"] = strip_markdown(current.get("content_markdown") or "")
         current["summary_markdown"] = _normalize_summary_markdown(current.get("summary_markdown") or "")
+        if "translation_title_en" in updates:
+            current["translation_title_en"] = str(current.get("translation_title_en") or "").strip() or None
+        if "translation_excerpt_en" in updates:
+            current["translation_excerpt_en"] = str(current.get("translation_excerpt_en") or "").strip() or None
+        if "translation_summary_en" in updates:
+            current["translation_summary_en"] = normalize_summary_display_markdown(current.get("translation_summary_en") or "", "en").strip() or None
+        if "translation_content_en" in updates:
+            current["translation_content_en"] = str(current.get("translation_content_en") or "").strip() or None
         current["excerpt"] = _extract_excerpt(strip_markdown(current["summary_markdown"]) or current["plain_text_content"], limit=180)
         current["updated_at"] = _now_iso()
         if current.get("formatting_notes") is not None:
@@ -2044,6 +2640,14 @@ def update_editorial_article(editorial_id: int, payload: dict) -> dict:
         clear_render = any(
             field in updates and _render_sensitive_field_changed(field, original_current.get(field), current.get(field))
             for field in render_sensitive_fields
+        )
+        translation_source_changed = bool(
+            "title" in updates
+            or "summary_markdown" in updates
+            or "content_markdown" in updates
+            or manual_summary_update
+            or manual_editor_update
+            or clear_render
         )
         if manual_summary_update:
             sanitized_summary_html = _sanitize_editor_html(updates.get("summary_html") or current.get("summary_html"))
@@ -2091,6 +2695,68 @@ def update_editorial_article(editorial_id: int, payload: dict) -> dict:
             current["editor_updated_at"] = current["updated_at"]
             if previous_final_html and previous_final_html != sanitized_final_html:
                 current["manual_final_html_backup"] = previous_final_html
+        if manual_translation_summary_update:
+            sanitized_summary_html_en = _sanitize_editor_html(updates.get("summary_html_en") or current.get("summary_html_en"))
+            if not sanitized_summary_html_en:
+                raise HTTPException(status_code=400, detail="English summary HTML cannot be empty")
+            current["summary_html_en"] = sanitized_summary_html_en
+            if "translation_summary_en" not in updates:
+                current["translation_summary_en"] = (
+                    normalize_summary_display_markdown(_html_to_plain_text(sanitized_summary_html_en), "en").strip() or None
+                )
+            current["translation_summary_editor_document_json"] = json.dumps(
+                _build_editor_document_payload(
+                    sanitized_summary_html_en,
+                    updates.get("translation_summary_editor_document")
+                    if isinstance(updates.get("translation_summary_editor_document"), dict)
+                    else None,
+                ),
+                ensure_ascii=False,
+            )
+            current["translation_status"] = "completed"
+            current["translation_error"] = None
+            current["translation_updated_at"] = current["updated_at"]
+        elif "translation_summary_en" in updates:
+            rendered_summary_html_en = (
+                render_summary_preview_html(current.get("translation_summary_en") or "", language="en")
+                if current.get("translation_summary_en")
+                else None
+            )
+            current["summary_html_en"] = rendered_summary_html_en
+            current["translation_summary_editor_document_json"] = (
+                json.dumps(_build_editor_document_payload(rendered_summary_html_en), ensure_ascii=False)
+                if rendered_summary_html_en
+                else "{}"
+            )
+            if current.get("translation_summary_en"):
+                current["translation_status"] = "completed"
+                current["translation_error"] = None
+                current["translation_updated_at"] = current["updated_at"]
+        if manual_translation_editor_update:
+            sanitized_final_html_en = _sanitize_editor_html(updates.get("final_html_en") or current.get("final_html_en") or current.get("html_web_en"))
+            if not sanitized_final_html_en:
+                raise HTTPException(status_code=400, detail="English final HTML cannot be empty")
+            current["final_html_en"] = sanitized_final_html_en
+            current["html_web_en"] = sanitized_final_html_en
+            current["html_wechat_en"] = sanitized_final_html_en
+            if "translation_content_en" not in updates:
+                current["translation_content_en"] = _html_to_plain_text(sanitized_final_html_en) or current.get("translation_content_en")
+            current["translation_editor_document_json"] = json.dumps(
+                _build_editor_document_payload(
+                    sanitized_final_html_en,
+                    updates.get("translation_editor_document")
+                    if isinstance(updates.get("translation_editor_document"), dict)
+                    else None,
+                ),
+                ensure_ascii=False,
+            )
+            current["translation_status"] = "completed"
+            current["translation_error"] = None
+            current["translation_updated_at"] = current["updated_at"]
+        elif "translation_content_en" in updates and current.get("translation_content_en"):
+            current["translation_status"] = "completed"
+            current["translation_error"] = None
+            current["translation_updated_at"] = current["updated_at"]
         elif clear_render:
             if previous_summary_html:
                 current["manual_summary_html_backup"] = previous_summary_html
@@ -2108,6 +2774,8 @@ def update_editorial_article(editorial_id: int, payload: dict) -> dict:
             current["editor_source"] = None
             current["editor_updated_at"] = None
             current["render_metadata_json"] = "{}"
+        if translation_source_changed and not english_update_requested:
+            _clear_editorial_translation_assets(current)
         elif current.get("status") == "published" and updates:
             current["editor_updated_at"] = current["updated_at"]
         current["publish_validation_json"] = _validation_payload_json(
@@ -2128,6 +2796,9 @@ def update_editorial_article(editorial_id: int, payload: dict) -> dict:
                 source_url = ?, cover_image_url = ?, primary_column_slug = ?, article_type = ?,
                 main_topic = ?, access_level = ?, source_markdown = ?, summary_markdown = ?, summary_html = ?,
                 summary_editor_document_json = ?, summary_model = ?, summary_updated_at = ?, manual_summary_html_backup = ?,
+                translation_title_en = ?, translation_excerpt_en = ?, translation_summary_en = ?, summary_html_en = ?,
+                translation_summary_editor_document_json = ?, translation_content_en = ?, final_html_en = ?, html_web_en = ?, html_wechat_en = ?,
+                translation_editor_document_json = ?, translation_status = ?, translation_error = ?, translation_model = ?, translation_updated_at = ?,
                 layout_mode = ?, formatting_notes = ?,
                 content_markdown = ?, plain_text_content = ?, excerpt = ?,
                 primary_column_manual = ?, tag_suggestion_payload_json = ?, tag_payload_json = ?, removed_tag_payload_json = ?,
@@ -2156,6 +2827,20 @@ def update_editorial_article(editorial_id: int, payload: dict) -> dict:
                 current.get("summary_model"),
                 current.get("summary_updated_at"),
                 current.get("manual_summary_html_backup"),
+                current.get("translation_title_en"),
+                current.get("translation_excerpt_en"),
+                current.get("translation_summary_en"),
+                current.get("summary_html_en"),
+                current.get("translation_summary_editor_document_json") or "{}",
+                current.get("translation_content_en"),
+                current.get("final_html_en"),
+                current.get("html_web_en"),
+                current.get("html_wechat_en"),
+                current.get("translation_editor_document_json") or "{}",
+                _normalize_translation_status(current.get("translation_status")),
+                current.get("translation_error"),
+                current.get("translation_model"),
+                current.get("translation_updated_at"),
                 current["layout_mode"],
                 current.get("formatting_notes"),
                 current.get("content_markdown"),
@@ -2401,6 +3086,20 @@ def auto_format_editorial_article(editorial_id: int, payload: dict | None = None
                 editor_source = ?,
                 editor_updated_at = ?,
                 manual_final_html_backup = ?,
+                translation_title_en = NULL,
+                translation_excerpt_en = NULL,
+                translation_summary_en = NULL,
+                summary_html_en = NULL,
+                translation_summary_editor_document_json = '{}',
+                translation_content_en = NULL,
+                final_html_en = NULL,
+                html_web_en = NULL,
+                html_wechat_en = NULL,
+                translation_editor_document_json = '{}',
+                translation_status = 'pending',
+                translation_error = NULL,
+                translation_model = NULL,
+                translation_updated_at = NULL,
                 render_metadata_json = ?,
                 publish_validation_json = ?,
                 updated_at = ?
@@ -2467,6 +3166,20 @@ def generate_editorial_summary(editorial_id: int) -> dict:
                 summary_model = ?,
                 summary_updated_at = ?,
                 manual_summary_html_backup = ?,
+                translation_title_en = NULL,
+                translation_excerpt_en = NULL,
+                translation_summary_en = NULL,
+                summary_html_en = NULL,
+                translation_summary_editor_document_json = '{}',
+                translation_content_en = NULL,
+                final_html_en = NULL,
+                html_web_en = NULL,
+                html_wechat_en = NULL,
+                translation_editor_document_json = '{}',
+                translation_status = 'pending',
+                translation_error = NULL,
+                translation_model = NULL,
+                translation_updated_at = NULL,
                 excerpt = ?,
                 updated_at = ?
             WHERE id = ?
@@ -2480,6 +3193,84 @@ def generate_editorial_summary(editorial_id: int) -> dict:
                 previous_summary_html if previous_summary_html and previous_summary_html != summary_html else current.get("manual_summary_html_backup"),
                 excerpt,
                 timestamp,
+                editorial_id,
+            ),
+        )
+        connection.commit()
+    return get_editorial_article(editorial_id)
+
+
+def generate_editorial_translation(editorial_id: int) -> dict:
+    with connection_scope() as connection:
+        current = dict(_fetch_editorial_row(connection, editorial_id))
+        connection.execute(
+            """
+            UPDATE editorial_articles
+            SET translation_status = 'running',
+                translation_error = NULL,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (_now_iso(), editorial_id),
+        )
+        connection.commit()
+
+    try:
+        article = get_editorial_article(editorial_id)
+        translated_assets = _build_editorial_translation_assets(article)
+    except Exception as exc:
+        error_message = str(exc)
+        with connection_scope() as connection:
+            connection.execute(
+                """
+                UPDATE editorial_articles
+                SET translation_status = 'failed',
+                    translation_error = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (error_message[:4000], _now_iso(), editorial_id),
+            )
+            connection.commit()
+        if isinstance(exc, HTTPException):
+            raise
+        raise HTTPException(status_code=502, detail=error_message or "AI 英文翻译失败。") from exc
+
+    with connection_scope() as connection:
+        connection.execute(
+            """
+            UPDATE editorial_articles
+            SET translation_title_en = ?,
+                translation_excerpt_en = ?,
+                translation_summary_en = ?,
+                summary_html_en = ?,
+                translation_summary_editor_document_json = ?,
+                translation_content_en = ?,
+                final_html_en = ?,
+                html_web_en = ?,
+                html_wechat_en = ?,
+                translation_editor_document_json = ?,
+                translation_status = 'completed',
+                translation_error = NULL,
+                translation_model = ?,
+                translation_updated_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                translated_assets["translation_title_en"],
+                translated_assets["translation_excerpt_en"],
+                translated_assets["translation_summary_en"],
+                translated_assets.get("summary_html_en"),
+                translated_assets["translation_summary_editor_document_json"],
+                translated_assets["translation_content_en"],
+                translated_assets["final_html_en"],
+                translated_assets["html_web_en"],
+                translated_assets["html_wechat_en"],
+                translated_assets["translation_editor_document_json"],
+                translated_assets["translation_model"],
+                translated_assets["translation_updated_at"],
+                translated_assets["translation_updated_at"],
                 editorial_id,
             ),
         )
@@ -2630,6 +3421,10 @@ def render_editorial_html(editorial_id: int) -> dict:
             """
             UPDATE editorial_articles
             SET final_html = ?, html_web = ?, html_wechat = ?, editor_document_json = ?, editor_source = ?, editor_updated_at = ?,
+                translation_title_en = NULL, translation_excerpt_en = NULL, translation_summary_en = NULL, summary_html_en = NULL,
+                translation_summary_editor_document_json = '{}', translation_content_en = NULL, final_html_en = NULL,
+                html_web_en = NULL, html_wechat_en = NULL, translation_editor_document_json = '{}',
+                translation_status = 'pending', translation_error = NULL, translation_model = NULL, translation_updated_at = NULL,
                 render_metadata_json = ?, publish_validation_json = ?, updated_at = ?
             WHERE id = ?
             """,
@@ -2665,6 +3460,14 @@ def export_editorial_html(editorial_id: int, variant: str) -> tuple[str, str]:
 
 def publish_editorial_article(editorial_id: int) -> dict:
     article = get_editorial_article(editorial_id)
+    has_summary_source = bool(
+        str(article.get("summary_markdown") or "").strip()
+        or str(article.get("summary_html") or "").strip()
+    )
+    if not has_summary_source:
+        article = generate_editorial_summary(editorial_id)
+    if not article.get("translation_ready"):
+        article = generate_editorial_translation(editorial_id)
     validation_errors = _build_publish_validation(article)
     if validation_errors:
         with connection_scope() as connection:
@@ -2686,6 +3489,14 @@ def publish_editorial_article(editorial_id: int) -> dict:
         selected_topics = _resolve_effective_editorial_topics(connection, row)
         summary_html = str(row.get("summary_html") or "").strip()
         published_summary_html = summary_html or _build_summary_editorial_html(row.get("summary_markdown") or row.get("excerpt") or "")
+        translation_summary_en = normalize_summary_display_markdown(row.get("translation_summary_en") or "", "en").strip()
+        if not translation_summary_en:
+            raise HTTPException(status_code=400, detail="英文摘要尚未就绪，请先完成 AI 英文翻译。")
+        summary_html_en = str(row.get("summary_html_en") or "").strip() or render_summary_preview_html(translation_summary_en, language="en")
+        translated_content = str(row.get("translation_content_en") or "").strip()
+        translated_final_html = str(row.get("final_html_en") or row.get("html_web_en") or row.get("html_wechat_en") or "").strip()
+        if not translated_content or not translated_final_html:
+            raise HTTPException(status_code=400, detail="英文正文尚未就绪，请先完成 AI 英文翻译。")
         excerpt = _extract_excerpt(
             strip_markdown(row.get("summary_markdown") or "") or row.get("plain_text_content") or "",
             limit=180,
@@ -2702,13 +3513,19 @@ def publish_editorial_article(editorial_id: int) -> dict:
         )
         plain_text = row["plain_text_content"]
         source_url = row.get("source_url") or None
+        existing_article_row = None
+        if row["article_id"]:
+            existing_article_row = connection.execute(
+                "SELECT id, cover_image_path FROM articles WHERE id = ?",
+                (row["article_id"],),
+            ).fetchone()
+        resolved_cover_image_url = str(row.get("cover_image_url") or "").strip() or (
+            str(existing_article_row["cover_image_path"] or "").strip() if existing_article_row is not None else None
+        )
 
         # In editorial drafts, `organization` is used as editor credit in the render flow.
         # Publishing it into article organization fields pollutes organization pages and autotag signals.
-        if row["article_id"] and connection.execute(
-            "SELECT id FROM articles WHERE id = ?",
-            (row["article_id"],),
-        ).fetchone():
+        if existing_article_row is not None:
             article_id = row["article_id"]
             connection.execute(
                 """
@@ -2739,7 +3556,7 @@ def publish_editorial_article(editorial_id: int) -> dict:
                     "",
                     f"{row['title']} {excerpt or ''} {plain_text[:4000]}",
                     _word_count(plain_text),
-                    row.get("cover_image_url") or None,
+                    resolved_cover_image_url,
                     row.get("access_level") or "public",
                     now,
                     article_id,
@@ -2775,7 +3592,7 @@ def publish_editorial_article(editorial_id: int) -> dict:
                     "",
                     f"{row['title']} {excerpt or ''} {plain_text[:4000]}",
                     _word_count(plain_text),
-                    row.get("cover_image_url") or None,
+                    resolved_cover_image_url,
                     row.get("access_level") or "public",
                     now,
                     now,
@@ -2826,6 +3643,20 @@ def publish_editorial_article(editorial_id: int) -> dict:
             """
         )
         connection.execute("DELETE FROM tags WHERE article_count <= 0")
+        _persist_published_article_translation_snapshot(
+            connection,
+            article_id=article_id,
+            translated={
+                "title": str(row.get("translation_title_en") or row["title"]).strip(),
+                "excerpt": str(row.get("translation_excerpt_en") or "").strip(),
+                "summary": translation_summary_en,
+                "content": translated_content,
+                "model": str(row.get("translation_model") or ai_service.GEMINI_FLASH_MODEL).strip() or ai_service.GEMINI_FLASH_MODEL,
+            },
+            summary_html_en=summary_html_en,
+            final_html_en=translated_final_html,
+            timestamp=now,
+        )
         connection.execute(
             """
             UPDATE editorial_articles
@@ -2836,18 +3667,32 @@ def publish_editorial_article(editorial_id: int) -> dict:
                 workflow_status = 'published',
                 excerpt = ?,
                 published_summary_html = ?,
+                published_summary_html_en = ?,
                 published_final_html = COALESCE(final_html, html_web, html_wechat),
+                published_final_html_en = COALESCE(final_html_en, html_web_en, html_wechat_en),
                 publish_validation_json = '[]',
                 approved_at = COALESCE(approved_at, ?),
                 published_at = COALESCE(published_at, ?),
                 updated_at = ?
             WHERE id = ?
             """,
-            (article_id, public_slug, DRAFT_BOX_STATE_ARCHIVED, excerpt, published_summary_html, now, now, now, editorial_id),
+            (
+                article_id,
+                public_slug,
+                DRAFT_BOX_STATE_ARCHIVED,
+                excerpt,
+                published_summary_html,
+                summary_html_en,
+                now,
+                now,
+                now,
+                editorial_id,
+            ),
         )
         connection.commit()
 
     refresh_search_cache()
+    sync_article_for_rag(article_id, trigger_source="editorial_publish")
     return {
         "editorial_id": editorial_id,
         "article_id": article_id,

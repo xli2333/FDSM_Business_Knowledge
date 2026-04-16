@@ -192,7 +192,7 @@ def expand_query(query: str) -> list[str]:
 
 
 EDITORIAL_SUMMARY_MIN_CHARS = 200
-EDITORIAL_SUMMARY_MAX_CHARS = 500
+EDITORIAL_SUMMARY_MAX_CHARS = 800
 EDITORIAL_SUMMARY_MIN_BULLETS = 3
 EDITORIAL_SUMMARY_MAX_BULLETS = 4
 EDITORIAL_SUMMARY_DEFAULT_BULLET_LABELS = (
@@ -368,13 +368,11 @@ def _format_editorial_summary_bullet(
     label: str | None,
     body: str,
     index: int,
-    *,
-    body_max_chars: int,
 ) -> str:
     label_value = _repair_editorial_summary_artifacts(str(label or "").strip()).rstrip("：:")
     if not label_value:
         label_value = EDITORIAL_SUMMARY_DEFAULT_BULLET_LABELS[index % len(EDITORIAL_SUMMARY_DEFAULT_BULLET_LABELS)]
-    normalized_body = _truncate_editorial_summary_text(body, max_chars=body_max_chars)
+    normalized_body = _normalize_editorial_summary_sentence(body)
     normalized_body = re.sub(rf"^{re.escape(label_value)}{_EDITORIAL_SUMMARY_COLON_PATTERN}\s*", "", normalized_body).strip()
     return f"- **{label_value}\uff1a** {normalized_body}"
 
@@ -383,7 +381,7 @@ def _build_editorial_summary_intro(
     sentences: list[str],
     *,
     target_min_chars: int = 90,
-    max_chars: int = 160,
+    max_chars: int = 220,
 ) -> tuple[str, list[str]]:
     remaining = list(sentences)
     intro_parts: list[str] = []
@@ -394,7 +392,7 @@ def _build_editorial_summary_intro(
         intro_parts.append(remaining.pop(0))
     if not intro_parts and remaining:
         intro_parts.append(remaining.pop(0))
-    intro_paragraph = _truncate_editorial_summary_text("".join(intro_parts), max_chars=max_chars)
+    intro_paragraph = _normalize_editorial_summary_sentence("".join(intro_parts))
     return _ensure_editorial_summary_emphasis(intro_paragraph), remaining
 
 
@@ -402,140 +400,19 @@ def _render_editorial_summary(
     intro_paragraph: str,
     selected_bullets: list[tuple[str | None, str]],
     trailing_paragraph: str,
-    *,
-    bullet_body_max_chars: int,
 ) -> str:
     parts: list[str] = []
     if intro_paragraph:
         parts.append(intro_paragraph)
     if selected_bullets:
         bullet_lines = [
-            _format_editorial_summary_bullet(label, body, index, body_max_chars=bullet_body_max_chars)
+            _format_editorial_summary_bullet(label, body, index)
             for index, (label, body) in enumerate(selected_bullets)
         ]
         parts.append("\n".join(bullet_lines))
     if trailing_paragraph:
         parts.append(_ensure_editorial_summary_emphasis(trailing_paragraph))
     return "\n\n".join(part for part in parts if part).strip()
-
-
-def _compose_editorial_summary_hybrid(
-    intro_sentences: list[str],
-    remaining_sentences: list[str],
-    bullet_items: list[tuple[str | None, str]],
-    *,
-    min_chars: int,
-    max_chars: int,
-) -> str:
-    intro_pool = [*intro_sentences, *remaining_sentences]
-    if not intro_pool and bullet_items:
-        intro_pool = _split_editorial_summary_sentences(" ".join(body for _, body in bullet_items[:2]))
-    intro_paragraph, leftover_sentences = _build_editorial_summary_intro(intro_pool)
-
-    bullet_seed = list(bullet_items)
-    bullet_seed.extend((None, sentence) for sentence in leftover_sentences)
-    if len(bullet_seed) >= EDITORIAL_SUMMARY_MAX_BULLETS:
-        bullet_target = EDITORIAL_SUMMARY_MAX_BULLETS
-    elif len(bullet_seed) >= EDITORIAL_SUMMARY_MIN_BULLETS:
-        bullet_target = EDITORIAL_SUMMARY_MIN_BULLETS
-    elif bullet_seed:
-        bullet_target = min(2, len(bullet_seed))
-    else:
-        bullet_target = 0
-    bullet_body_max_chars = 72 if bullet_target >= 4 else 88
-
-    selected_bullets = bullet_seed[:bullet_target]
-    unused_bullets = bullet_seed[bullet_target:]
-    trailing_paragraph = ""
-    summary = _render_editorial_summary(
-        intro_paragraph,
-        selected_bullets,
-        trailing_paragraph,
-        bullet_body_max_chars=bullet_body_max_chars,
-    )
-
-    while editorial_summary_visible_length(summary) < min_chars and unused_bullets and len(selected_bullets) < EDITORIAL_SUMMARY_MAX_BULLETS:
-        selected_bullets.append(unused_bullets.pop(0))
-        bullet_body_max_chars = 72 if len(selected_bullets) >= 4 else 88
-        summary = _render_editorial_summary(
-            intro_paragraph,
-            selected_bullets,
-            trailing_paragraph,
-            bullet_body_max_chars=bullet_body_max_chars,
-        )
-
-    if editorial_summary_visible_length(summary) < min_chars and unused_bullets:
-        trailing_paragraph = _truncate_editorial_summary_text(
-            "".join(body for _, body in unused_bullets),
-            max_chars=min(120, max_chars // 3),
-        )
-        summary = _render_editorial_summary(
-            intro_paragraph,
-            selected_bullets,
-            trailing_paragraph,
-            bullet_body_max_chars=bullet_body_max_chars,
-        )
-
-    while editorial_summary_visible_length(summary) > max_chars and trailing_paragraph:
-        trailing_length = editorial_summary_visible_length(trailing_paragraph)
-        if trailing_length <= 50:
-            trailing_paragraph = ""
-        else:
-            trailing_paragraph = _truncate_editorial_summary_text(trailing_paragraph, max_chars=trailing_length - 20)
-        summary = _render_editorial_summary(
-            intro_paragraph,
-            selected_bullets,
-            trailing_paragraph,
-            bullet_body_max_chars=bullet_body_max_chars,
-        )
-
-    while editorial_summary_visible_length(summary) > max_chars and len(selected_bullets) > EDITORIAL_SUMMARY_MIN_BULLETS:
-        selected_bullets.pop()
-        bullet_body_max_chars = 72 if len(selected_bullets) >= 4 else 88
-        summary = _render_editorial_summary(
-            intro_paragraph,
-            selected_bullets,
-            trailing_paragraph,
-            bullet_body_max_chars=bullet_body_max_chars,
-        )
-
-    while editorial_summary_visible_length(summary) > max_chars and selected_bullets:
-        label, body = selected_bullets[-1]
-        body_length = editorial_summary_visible_length(body)
-        if body_length <= 40:
-            break
-        selected_bullets[-1] = (label, _truncate_editorial_summary_text(body, max_chars=body_length - 18))
-        summary = _render_editorial_summary(
-            intro_paragraph,
-            selected_bullets,
-            trailing_paragraph,
-            bullet_body_max_chars=bullet_body_max_chars,
-        )
-
-    if editorial_summary_visible_length(summary) > max_chars:
-        intro_budget = max(80, max_chars - sum(editorial_summary_visible_length(body) + 10 for _, body in selected_bullets))
-        intro_paragraph = _ensure_editorial_summary_emphasis(
-            _truncate_editorial_summary_text(intro_paragraph, max_chars=intro_budget)
-        )
-        summary = _render_editorial_summary(
-            intro_paragraph,
-            selected_bullets,
-            trailing_paragraph,
-            bullet_body_max_chars=bullet_body_max_chars,
-        )
-
-    if "**" not in summary:
-        if intro_paragraph:
-            intro_paragraph = _ensure_editorial_summary_emphasis(intro_paragraph)
-        elif trailing_paragraph:
-            trailing_paragraph = _ensure_editorial_summary_emphasis(trailing_paragraph)
-        summary = _render_editorial_summary(
-            intro_paragraph,
-            selected_bullets,
-            trailing_paragraph,
-            bullet_body_max_chars=bullet_body_max_chars,
-        )
-    return _repair_editorial_summary_artifacts(summary).strip()
 
 
 def normalize_editorial_summary_output(
@@ -545,8 +422,20 @@ def normalize_editorial_summary_output(
     max_chars: int = EDITORIAL_SUMMARY_MAX_CHARS,
 ) -> str:
     lines = _repair_editorial_summary_artifacts(str(text or "").replace("\r\n", "\n").replace("\r", "\n")).split("\n")
+    del min_chars
+    del max_chars
+    blocks: list[tuple[str, str]] = []
     paragraph_lines: list[str] = []
-    bullet_items: list[tuple[str | None, str]] = []
+    bullet_index = 0
+
+    def flush_paragraph() -> None:
+        nonlocal paragraph_lines
+        if not paragraph_lines:
+            return
+        paragraph = _normalize_editorial_summary_sentence(" ".join(paragraph_lines))
+        if paragraph:
+            blocks.append(("paragraph", paragraph))
+        paragraph_lines = []
 
     for raw_line in lines:
         stripped = raw_line.strip()
@@ -558,7 +447,7 @@ def normalize_editorial_summary_output(
         normalized_raw = _EDITORIAL_SUMMARY_HEADING_PREFIX_RE.sub("", stripped)
         normalized_raw = _EDITORIAL_SUMMARY_LIST_PREFIX_RE.sub("", normalized_raw)
         plain = _repair_editorial_summary_artifacts(_strip_inline_markdown_tokens(normalized_raw))
-        if not paragraph_lines and not bullet_items:
+        if not paragraph_lines and not blocks:
             normalized_raw = _strip_editorial_summary_meta_lead(normalized_raw)
             plain = _strip_editorial_summary_meta_lead(plain)
         if not plain:
@@ -567,37 +456,49 @@ def normalize_editorial_summary_output(
             continue
         if was_heading:
             continue
-        if not paragraph_lines and not bullet_items and _looks_like_editorial_summary_heading(plain):
+        if not paragraph_lines and not blocks and _looks_like_editorial_summary_heading(plain):
             continue
 
         label, body = _extract_editorial_summary_label(normalized_raw)
         if was_list:
             if body:
-                bullet_items.append((label, body))
+                flush_paragraph()
+                blocks.append(("bullet", _format_editorial_summary_bullet(label, body, bullet_index)))
+                bullet_index += 1
             continue
         if label and editorial_summary_visible_length(body) >= 18:
-            bullet_items.append((label, body))
+            flush_paragraph()
+            blocks.append(("bullet", _format_editorial_summary_bullet(label, body, bullet_index)))
+            bullet_index += 1
             continue
 
         plain = re.sub(r"\s+", " ", plain).strip()
         if plain:
             paragraph_lines.append(plain)
 
-    paragraph_sentences = _split_editorial_summary_sentences(" ".join(paragraph_lines))
-    if not paragraph_sentences and not bullet_items:
+    flush_paragraph()
+
+    if not blocks:
         return ""
 
-    intro_sentences: list[str] = []
-    while paragraph_sentences and len(intro_sentences) < 2:
-        intro_sentences.append(paragraph_sentences.pop(0))
+    if "**" not in "\n".join(text for _, text in blocks):
+        for index, (kind, value) in enumerate(blocks):
+            if kind == "paragraph":
+                blocks[index] = (kind, _ensure_editorial_summary_emphasis(value))
+                break
+        else:
+            blocks[0] = (blocks[0][0], _ensure_editorial_summary_emphasis(blocks[0][1]))
 
-    return _compose_editorial_summary_hybrid(
-        intro_sentences,
-        paragraph_sentences,
-        bullet_items,
-        min_chars=min_chars,
-        max_chars=max_chars,
-    ).strip()
+    rendered: list[str] = []
+    previous_kind = ""
+    for kind, value in blocks:
+        if not value:
+            continue
+        if rendered and not (previous_kind == "bullet" and kind == "bullet"):
+            rendered.append("")
+        rendered.append(value)
+        previous_kind = kind
+    return _repair_editorial_summary_artifacts("\n".join(rendered)).strip()
 
 
 def build_extractive_summary(content: str) -> str:
@@ -605,7 +506,7 @@ def build_extractive_summary(content: str) -> str:
     if not paragraphs:
         return "No summary is available yet."
     fallback = ""
-    for limit in (10, 16, 24):
+    for limit in (10, 16, 24, len(paragraphs)):
         candidate = normalize_editorial_summary_output("\n\n".join(paragraphs[:limit]))
         if candidate:
             fallback = candidate
@@ -626,23 +527,24 @@ def _build_editorial_content_window(content: str, *, max_chars: int = 16000, tai
 
 def summarize_article_payload(title: str, content: str) -> dict[str, str]:
     fallback = build_extractive_summary(content)
-    content_window = _build_editorial_content_window(content, max_chars=18000, tail_chars=4000)
+    content_window = str(content or "").strip()
     if not is_ai_enabled():
         return {"summary": fallback, "model": "extractive-fallback"}
     prompt = (
         "You are an editor for a Chinese business knowledge product.\n"
-        "Write a concise hybrid-structure article summary.\n"
+        "Write a complete article summary that still reads compactly.\n"
         "Hard requirements:\n"
         "1. Return the summary body only.\n"
-        "2. Keep the total length between 200 and 500 Chinese characters.\n"
-        "3. Prefer one short opening paragraph, then use 3 or 4 Markdown bullet points when bullets help readability.\n"
-        "4. Do not let the entire answer become only a bullet list.\n"
-        "5. Keep 1 to 3 key phrases visibly emphasized with Markdown bold.\n"
-        "6. Do not add any prefatory phrases such as 'Below is', 'Here is', '以下是', '下面是', '本文', or '这篇文章'.\n"
-        "7. Do not write a title, heading, numbered outline, section label, digest framing, or brief framing.\n"
-        "8. Preserve the article's core facts, logic, and implications without inventing anything.\n"
-        "9. Use the same language as the article.\n"
-        "10. Output Markdown only.\n\n"
+        "2. Aim for roughly 320 to 1200 Chinese characters when the source supports it, but never cut off the article's later-stage judgment just to stay short.\n"
+        "3. Start with one opening paragraph that explains the article as a whole.\n"
+        "4. When bullets help readability, use 3 to 5 Markdown bullet points for the main dimensions, but do not let the entire answer become only a bullet list.\n"
+        "5. End with one short closing paragraph that closes the overall business judgment, implication, or conclusion from the full article.\n"
+        "6. Keep 1 to 3 key phrases visibly emphasized with Markdown bold.\n"
+        "7. Do not add any prefatory phrases such as 'Below is', 'Here is', '以下是', '下面是', '本文', or '这篇文章'.\n"
+        "8. Do not write a title, heading, numbered outline, section label, digest framing, or brief framing.\n"
+        "9. Preserve the article's core facts, logic, middle argument, and ending implications without inventing anything.\n"
+        "10. Use the same language as the article.\n"
+        "11. Output Markdown only.\n\n"
         "Title:\n{title}\n\n"
         "Article:\n{content}\n\n"
         "Summary:"
@@ -687,20 +589,481 @@ def _truncate_media_copy_text(value: str, *, max_chars: int) -> str:
     return clipped
 
 
-def _build_media_body_fallback(summary: str, source_text: str) -> str:
-    source_compact = _compact_media_copy_text(source_text)
-    intro = _truncate_media_copy_text(summary or source_compact, max_chars=150)
-    remainder = source_compact[len(intro) :].strip() if intro and source_compact.startswith(intro.rstrip("。")) else source_compact
-    supporting = _truncate_media_copy_text(remainder, max_chars=180) if remainder else ""
+_MEDIA_SUMMARY_META_LEAD_RE = re.compile(
+    r"^(?:以下是|下面是|节目摘要如下|摘要如下|本期节目摘要|节目摘要|summary|program summary|brief summary)\s*(?:[:：-]\s*)?",
+    flags=re.IGNORECASE,
+)
+_MEDIA_SUMMARY_LIST_PREFIX_RE = re.compile(r"^(?:[-*+]\s+|\d+\.\s+)")
+_MEDIA_SUMMARY_HEADING_PREFIX_RE = re.compile(r"^#{1,6}\s+")
+
+
+def _strip_media_summary_meta(text: str) -> str:
+    normalized = _strip_code_fence(str(text or "").replace("\r\n", "\n").replace("\r", "\n"))
+    cleaned_lines: list[str] = []
+    for raw_line in normalized.split("\n"):
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        stripped = _MEDIA_SUMMARY_HEADING_PREFIX_RE.sub("", stripped)
+        stripped = _MEDIA_SUMMARY_LIST_PREFIX_RE.sub("", stripped)
+        stripped = _MEDIA_SUMMARY_META_LEAD_RE.sub("", stripped, count=1).strip()
+        if stripped:
+            cleaned_lines.append(stripped)
+    return "\n".join(cleaned_lines).strip()
+
+
+def _strip_media_summary_label(text: str) -> str:
+    return re.sub(
+        r"^(?:节目摘要|摘要|核心摘要|program summary|summary|overview)\s*(?:[:：-]\s*)?",
+        "",
+        str(text or "").strip(),
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def normalize_media_summary_markdown(text: str, *, max_chars: int = 180) -> str:
+    compact = _truncate_media_copy_text(_strip_media_summary_meta(text), max_chars=max_chars)
+    compact = _strip_media_summary_label(compact)
+    if not compact:
+        return ""
+    label = "节目摘要" if re.search(r"[\u4e00-\u9fff]", compact) else "Program summary"
+    punctuation = "：" if label == "节目摘要" else ":"
+    return f"**{label}{punctuation}** {compact}"
+
+
+_MEDIA_CHAPTER_LABEL_PATTERN = r"(?:\d{1,2}:)?\d{1,2}:\d{2}"
+_MEDIA_CHAPTER_HEADER_RE = re.compile(
+    rf"^(?:[-*+]\s*)?(?:(?:发言人|主持人|嘉宾|主播|主讲人|旁白|讲者|Speaker|Host|Guest|Presenter|Anchor|Narrator|Interviewer|Interviewee)"
+    r"(?:[\s#：:.\-]*[\w\u4e00-\u9fff-]{1,20})?\s+)?(?P<label>"
+    rf"{_MEDIA_CHAPTER_LABEL_PATTERN})"
+    r"(?:\s*(?:[-—–|：:]\s*)?(?P<body>.+))?$",
+    re.IGNORECASE,
+)
+_MEDIA_CHAPTER_TITLE_PREFIX_RE = re.compile(
+    r"^(?:章节|目录|章节目录|chapter|section)\s*(?:标题|title)?\s*(?:[:：-]\s*)?",
+    re.IGNORECASE,
+)
+_MEDIA_CHAPTER_CATEGORY_PREFIX_RE = re.compile(
+    r"^(?:问题引入|核心悬念|行业背景|招股书拆解|决策视角|案例拆解|发布收口|经营判断|资本路径|章节[一二三四五六七八九十0-9]+|part\s*\d+|section\s*\d+|chapter\s*\d+)\s*(?:[:：-]\s*)",
+    re.IGNORECASE,
+)
+_MEDIA_CHAPTER_SHORT_LABEL_RE = re.compile(r"^(?P<label>[^:：]{1,8})\s*[:：]\s*(?P<body>.+)$")
+_MEDIA_CHAPTER_TITLE_FILLER_RE = re.compile(
+    r"^(?:这一部分|这一段|本段|本节|这一章|本章节|这里主要|本部分|这一部分主要在讲|这一段主要在讲)\s*",
+    re.IGNORECASE,
+)
+_MEDIA_CHAPTER_TRAILING_PUNCT_RE = re.compile(r"[，,；;：:。！？!?、]+$")
+_MEDIA_CHAPTER_GENERIC_LABELS = {
+    "问题引入",
+    "核心悬念",
+    "行业背景",
+    "招股书拆解",
+    "决策视角",
+    "案例拆解",
+    "发布收口",
+    "经营判断",
+    "资本路径",
+    "章节",
+    "chapter",
+    "section",
+    "part",
+}
+
+
+def _normalize_media_chapter_label(label: str | None) -> str:
+    raw = str(label or "").strip()
+    if not raw:
+        return ""
+    parts = raw.split(":")
+    try:
+        numbers = [int(part) for part in parts]
+    except ValueError:
+        return ""
+    if len(numbers) == 2:
+        minutes, seconds = numbers
+        return f"{minutes:02d}:{seconds:02d}"
+    if len(numbers) == 3:
+        hours, minutes, seconds = numbers
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return ""
+
+
+def _media_chapter_label_to_seconds(label: str) -> int:
+    parts = [int(part) for part in str(label or "").split(":")]
+    if len(parts) == 2:
+        minutes, seconds = parts
+        return max(0, minutes * 60 + seconds)
+    if len(parts) == 3:
+        hours, minutes, seconds = parts
+        return max(0, hours * 3600 + minutes * 60 + seconds)
+    return 0
+
+
+def _extract_media_timestamp_candidates(source_text: str, *, max_items: int = 12) -> list[str]:
+    seen: set[str] = set()
+    labels: list[str] = []
+    normalized = str(source_text or "").replace("\r\n", "\n").replace("\r", "\n")
+    for raw_line in normalized.split("\n"):
+        compact = _compact_media_copy_text(strip_markdown(raw_line))
+        if not compact:
+            continue
+        match = _MEDIA_CHAPTER_HEADER_RE.match(compact)
+        if not match:
+            continue
+        label = _normalize_media_chapter_label(match.group("label"))
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        labels.append(label)
+        if len(labels) >= max_items:
+            break
+    return labels
+
+
+def normalize_media_chapter_title(text: str | None, *, max_chars: int = 30) -> str:
+    compact = _compact_media_copy_text(strip_markdown(text or ""))
+    compact = _MEDIA_CHAPTER_TITLE_PREFIX_RE.sub("", compact, count=1).strip()
+    compact = _MEDIA_CHAPTER_CATEGORY_PREFIX_RE.sub("", compact, count=1).strip()
+    compact = _MEDIA_CHAPTER_TITLE_FILLER_RE.sub("", compact, count=1).strip()
+    short_label_match = _MEDIA_CHAPTER_SHORT_LABEL_RE.match(compact)
+    if short_label_match:
+        label = short_label_match.group("label").strip().lower()
+        body = short_label_match.group("body").strip()
+        if label in {item.lower() for item in _MEDIA_CHAPTER_GENERIC_LABELS} or len(label) <= 6:
+            compact = body
+    compact = compact.replace("：", " ").replace(":", " ")
+    compact = compact.strip("-—–:：[]()（） ")
+    compact = _MEDIA_CHAPTER_TRAILING_PUNCT_RE.sub("", compact).strip()
+    return _truncate_media_copy_text(compact, max_chars=max_chars) if compact else ""
+
+
+def _media_chapter_title_signature(text: str | None) -> str:
+    compact = normalize_media_chapter_title(text, max_chars=40).lower()
+    compact = re.sub(r"\s+", "", compact)
+    compact = re.sub(r"[，,；;：:。！？!?、\-\[\]()（）]", "", compact)
+    return compact
+
+
+def media_generated_chapters_need_revision(chapters: list[dict] | None) -> bool:
+    if not chapters:
+        return False
+    seen_signatures: set[str] = set()
+    for item in chapters:
+        title = str(item.get("title") or "").strip()
+        signature = _media_chapter_title_signature(title)
+        if not title or not signature:
+            return True
+        if "：" in title or ":" in title:
+            return True
+        if signature in seen_signatures:
+            return True
+        seen_signatures.add(signature)
+    return False
+
+
+def normalize_media_generated_chapters(chapters, *, source_text: str, max_items: int = 8) -> list[dict]:
+    if not isinstance(chapters, list):
+        return []
+
+    allowed_labels = _extract_media_timestamp_candidates(source_text, max_items=max(12, max_items * 2))
+    if not allowed_labels:
+        return []
+    allowed_set = set(allowed_labels)
+    order_map = {label: index for index, label in enumerate(allowed_labels)}
+
+    normalized_items: list[dict] = []
+    seen_labels: set[str] = set()
+    seen_title_signatures: set[str] = set()
+    for item in chapters:
+        if not isinstance(item, dict):
+            continue
+        label = _normalize_media_chapter_label(
+            item.get("timestamp_label") or item.get("timestamp") or item.get("time") or item.get("label")
+        )
+        title = normalize_media_chapter_title(
+            item.get("title") or item.get("heading") or item.get("summary") or item.get("name")
+        )
+        signature = _media_chapter_title_signature(title)
+        if not label or not title or not signature or label not in allowed_set or label in seen_labels or signature in seen_title_signatures:
+            continue
+        seen_labels.add(label)
+        seen_title_signatures.add(signature)
+        normalized_items.append(
+            {
+                "timestamp_label": label,
+                "timestamp_seconds": _media_chapter_label_to_seconds(label),
+                "title": title,
+            }
+        )
+
+    normalized_items.sort(
+        key=lambda item: (
+            order_map.get(item["timestamp_label"], len(order_map)),
+            int(item.get("timestamp_seconds") or 0),
+        )
+    )
+    return normalized_items[:max_items]
+
+
+def _normalize_media_generation_source_value(value: str | None) -> str:
+    normalized = str(value or "").strip()
+    if normalized.lower() in {"none", "null", "undefined"}:
+        return ""
+    return normalized
+
+
+def _resolve_media_generation_source_text(*, transcript_markdown: str, script_markdown: str) -> str:
+    transcript_text = _normalize_media_generation_source_value(transcript_markdown)
+    if transcript_text:
+        return transcript_text
+    return _normalize_media_generation_source_value(script_markdown)
+
+
+def generate_media_chapter_outline(
+    *,
+    title: str,
+    kind: str,
+    speaker: str,
+    series_name: str,
+    transcript_markdown: str,
+    script_markdown: str,
+) -> dict[str, object]:
+    source_text = _resolve_media_generation_source_text(
+        transcript_markdown=transcript_markdown,
+        script_markdown=script_markdown,
+    )
+    if not source_text:
+        raise RuntimeError("Media chapter source is empty.")
+
+    timestamp_candidates = _extract_media_timestamp_candidates(source_text)
+    if not timestamp_candidates:
+        return {
+            "chapters": [],
+            "model": "timestamp-unavailable",
+        }
+    if not is_ai_enabled():
+        return {
+            "chapters": [],
+            "model": "extractive-fallback",
+        }
+
+    timestamp_hint_block = "\n".join(f"- {label}" for label in timestamp_candidates)
+    prompt = (
+        "You are helping a Chinese business knowledge media CMS produce a chapter outline for an audio or video program.\n"
+        "Return strict JSON only with this shape:\n"
+        "{\n"
+        '  "chapters": [{"timestamp_label": "00:00", "title": "主题化目录标题"}]\n'
+        "}\n"
+        "Hard requirements:\n"
+        "1. Use only the timestamps from the detected list below. Never invent a new timestamp.\n"
+        "2. Keep chapters in chronological order.\n"
+        "3. Each title must summarize what that section is about, not quote the raw opening sentence.\n"
+        "4. Remove oral fillers such as 欢迎来到、看完之后、然后、最后 and similar spoken transitions.\n"
+        "5. Keep titles lightweight and outline-style. Prefer 8-24 Chinese characters or 3-8 English words.\n"
+        "6. Do not use category labels or prefixes such as 问题引入、核心悬念、行业背景、招股书拆解、决策视角、案例拆解、发布收口.\n"
+        "7. Do not use : or ： in the title. Write the topic directly as a standalone heading.\n"
+        "8. Make the titles mutually distinct. If two adjacent sections discuss different things, the titles must also be different.\n"
+        "9. No Markdown, no numbering, no speaker names, no quotation marks around the title.\n"
+        "10. It is acceptable to omit weak timestamps, but keep the strongest 3 to 8 sections when possible.\n\n"
+        "Detected timestamps:\n"
+        f"{timestamp_hint_block}\n\n"
+        f"Title: {title.strip() or '未命名节目'}\n"
+        f"Kind: {kind.strip() or 'audio'}\n"
+        f"Speaker: {speaker.strip() or 'None'}\n"
+        f"Series: {series_name.strip() or 'None'}\n\n"
+        f"Source:\n{source_text}\n\nJSON:"
+    )
+    try:
+        raw = _request_gemini_text(
+            prompt=prompt,
+            model_name=GEMINI_CHAT_MODEL,
+            response_mime_type="application/json",
+        )
+        payload = _parse_json_payload(raw)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Media chapter payload must be a JSON object.")
+        chapters_payload = normalize_media_generated_chapters(
+            payload.get("chapters"),
+            source_text=source_text,
+            max_items=8,
+        )
+        if chapters_payload and media_generated_chapters_need_revision(chapters_payload):
+            revision_prompt = (
+                "You are revising a chapter outline for a Chinese business knowledge media CMS.\n"
+                "Return strict JSON only with this shape:\n"
+                "{\n"
+                '  "chapters": [{"timestamp_label": "00:00", "title": "直接说明这部分讲什么"}]\n'
+                "}\n"
+                "Rewrite only the titles. Keep the timestamps from the draft outline.\n"
+                "Hard requirements:\n"
+                "1. Keep the same timestamp_label values from the draft outline. Never add or delete timestamps.\n"
+                "2. Titles must be unique across the array.\n"
+                "3. Do not use category labels or prefixes such as 问题引入、核心悬念、行业背景、招股书拆解、决策视角、案例拆解、发布收口.\n"
+                "4. Do not use : or ： in any title.\n"
+                "5. Each title should directly say what that section is discussing, like a clean article subheading.\n"
+                "6. Remove spoken fillers such as 欢迎来到、看完之后、然后、最后 and similar transitions.\n"
+                "7. Keep titles concise and concrete.\n\n"
+                f"Draft outline:\n{json.dumps(chapters_payload, ensure_ascii=False)}\n\n"
+                f"Source:\n{source_text}\n\nJSON:"
+            )
+            revised_raw = _request_gemini_text(
+                prompt=revision_prompt,
+                model_name=GEMINI_CHAT_MODEL,
+                response_mime_type="application/json",
+            )
+            revised_payload = _parse_json_payload(revised_raw)
+            if isinstance(revised_payload, dict):
+                revised_chapters = normalize_media_generated_chapters(
+                    revised_payload.get("chapters"),
+                    source_text=source_text,
+                    max_items=8,
+                )
+                if revised_chapters and not media_generated_chapters_need_revision(revised_chapters):
+                    chapters_payload = revised_chapters
+        return {
+            "chapters": chapters_payload,
+            "model": GEMINI_CHAT_MODEL,
+        }
+    except Exception:
+        return {
+            "chapters": [],
+            "model": "extractive-fallback",
+        }
+
+
+_MEDIA_BODY_LIST_PREFIX_RE = re.compile(r"^(?:[-*+]\s+|\d+\.\s+)")
+_MEDIA_BODY_HEADING_PREFIX_RE = re.compile(r"^#{1,6}\s+")
+_MEDIA_BODY_TIMESTAMP_LINE_RE = re.compile(
+    r"^(?:[-*+]\s*)?(?:\[\s*)?(?:(?:\d{1,2}:)?\d{1,2}:\d{2})(?:\s*\])?\s*(?:[-—–:：]\s*)?(?P<body>.+)$"
+)
+_MEDIA_BODY_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？?!；;])\s+")
+
+
+def _normalize_media_highlight_line(text: str, *, max_chars: int = 72) -> str:
+    compact = _compact_media_copy_text(text)
+    compact = re.sub(r"^(?:transcript|script|节目脚本|节目转录|逐字稿)\s*", "", compact, flags=re.IGNORECASE).strip()
+    compact = compact.strip("-—–:：[]()（） ")
+    if len(compact) < 4:
+        return ""
+    return _truncate_media_copy_text(compact, max_chars=max_chars)
+
+
+def _extract_media_highlights(source_text: str, *, intro_text: str = "", max_items: int = 3) -> list[str]:
+    normalized = _strip_code_fence(str(source_text or "").replace("\r\n", "\n").replace("\r", "\n"))
+    seen: set[str] = set()
+    highlights: list[str] = []
+    intro_compact = _compact_media_copy_text(intro_text).lower()
+
+    def push(candidate: str) -> None:
+        normalized_candidate = _normalize_media_highlight_line(candidate)
+        if not normalized_candidate:
+            return
+        compact_candidate = _compact_media_copy_text(normalized_candidate).lower()
+        if compact_candidate in seen:
+            return
+        if intro_compact and (compact_candidate in intro_compact or intro_compact in compact_candidate):
+            return
+        seen.add(compact_candidate)
+        highlights.append(normalized_candidate)
+
+    for raw_line in normalized.split("\n"):
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        stripped = _MEDIA_BODY_HEADING_PREFIX_RE.sub("", stripped)
+        timestamp_match = _MEDIA_BODY_TIMESTAMP_LINE_RE.match(stripped)
+        if timestamp_match:
+            push(timestamp_match.group("body"))
+        else:
+            push(_MEDIA_BODY_LIST_PREFIX_RE.sub("", stripped))
+        if len(highlights) >= max_items:
+            return highlights[:max_items]
+
+    plain_source = strip_markdown(normalized)
+    compact_source = re.sub(r"\s+", " ", plain_source).strip()
+    if compact_source:
+        for sentence in _MEDIA_BODY_SENTENCE_SPLIT_RE.split(compact_source):
+            push(sentence)
+            if len(highlights) >= max_items:
+                break
+    return highlights[:max_items]
+
+
+def normalize_media_body_markdown(text: str, *, summary: str, source_text: str) -> str:
+    cleaned = _strip_code_fence(str(text or "").replace("\r\n", "\n").replace("\r", "\n")).strip()
+    cleaned = re.sub(r"^(?:#\s+.*\n+)+", "", cleaned).strip()
+    cleaned = re.sub(
+        r"^(?:以下是|下面是|节目简介如下|本文|这期节目将).{0,40}?(?:[:：])?\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    paragraphs: list[str] = []
+    inline_highlights: list[str] = []
+    current_paragraph: list[str] = []
+
+    def flush_paragraph() -> None:
+        if not current_paragraph:
+            return
+        paragraph = _truncate_media_copy_text(" ".join(current_paragraph), max_chars=180)
+        if paragraph:
+            paragraphs.append(paragraph)
+        current_paragraph.clear()
+
+    for raw_line in cleaned.split("\n"):
+        stripped = raw_line.strip()
+        if not stripped:
+            flush_paragraph()
+            continue
+        if _MEDIA_BODY_HEADING_PREFIX_RE.match(stripped):
+            flush_paragraph()
+            continue
+        if _MEDIA_BODY_LIST_PREFIX_RE.match(stripped):
+            flush_paragraph()
+            bullet_text = _MEDIA_BODY_LIST_PREFIX_RE.sub("", stripped)
+            normalized_bullet = _normalize_media_highlight_line(bullet_text)
+            if normalized_bullet:
+                inline_highlights.append(normalized_bullet)
+            continue
+        current_paragraph.append(stripped)
+    flush_paragraph()
+
+    intro_seed = paragraphs[0] if paragraphs else _strip_media_summary_label(_compact_media_copy_text(summary))
+    intro = _truncate_media_copy_text(intro_seed or _compact_media_copy_text(source_text), max_chars=160)
+
+    highlights: list[str] = []
+    seen_highlights: set[str] = set()
+    for candidate in [*inline_highlights, *paragraphs[1:], *_extract_media_highlights(source_text, intro_text=intro, max_items=3)]:
+        normalized_candidate = _normalize_media_highlight_line(candidate)
+        if not normalized_candidate:
+            continue
+        compact_candidate = _compact_media_copy_text(normalized_candidate).lower()
+        compact_intro = _compact_media_copy_text(intro).lower()
+        if compact_candidate in seen_highlights:
+            continue
+        if compact_intro and (compact_candidate in compact_intro or compact_intro in compact_candidate):
+            continue
+        seen_highlights.add(compact_candidate)
+        highlights.append(normalized_candidate)
+        if len(highlights) >= 3:
+            break
+
     parts = ["## 节目简介", ""]
     if intro:
         parts.append(intro)
-    if supporting and supporting != intro:
-        parts.extend(["", supporting])
+    if highlights:
+        parts.extend(["", "### 核心看点", ""])
+        parts.extend([f"- {item}" for item in highlights[:3]])
     return "\n".join(parts).strip()
 
 
-def generate_media_text_assets(
+def _build_media_body_fallback(summary: str, source_text: str) -> str:
+    return normalize_media_body_markdown("", summary=summary, source_text=source_text)
+
+
+def _legacy_generate_media_text_assets(
     *,
     title: str,
     kind: str,
@@ -709,12 +1072,15 @@ def generate_media_text_assets(
     transcript_markdown: str,
     script_markdown: str,
 ) -> dict[str, str]:
-    source_text = str(script_markdown or transcript_markdown or "").strip()
+    source_text = _resolve_media_generation_source_text(
+        transcript_markdown=transcript_markdown,
+        script_markdown=script_markdown,
+    )
     if not source_text:
         raise RuntimeError("Media copy source is empty.")
 
     plain_source = _compact_media_copy_text(source_text)
-    fallback_summary = _truncate_media_copy_text(plain_source or title, max_chars=160)
+    fallback_summary = normalize_media_summary_markdown(plain_source or title, max_chars=160)
     fallback_body = _build_media_body_fallback(fallback_summary or title, plain_source or title)
     if not is_ai_enabled():
         return {
@@ -723,26 +1089,26 @@ def generate_media_text_assets(
             "model": "extractive-fallback",
         }
 
-    source_window = _build_editorial_content_window(source_text, max_chars=16000, tail_chars=3000)
     prompt = (
         "You are helping a Chinese business knowledge media CMS produce copy for an audio or video program.\n"
         "Return strict JSON only with this shape:\n"
         "{\n"
-        '  "summary": "80-180 Chinese characters, one compact paragraph",\n'
-        '  "body_markdown": "Markdown only, start with ## 节目简介, then 1 or 2 short paragraphs"\n'
+        '  "summary": "Markdown only, 80-180 Chinese characters, one short paragraph with at most one bold lead phrase",\n'
+        '  "body_markdown": "Markdown only, start with ## 节目简介, include one short intro paragraph, then optionally add ### 核心看点 with 2 or 3 bullet points"\n'
         "}\n"
         "Hard requirements:\n"
         "1. Keep the same language as the source.\n"
         "2. Do not invent facts beyond the transcript or script.\n"
         "3. Do not add prefatory phrases such as 以下是、下面是、节目简介如下、本文、这期节目将.\n"
-        "4. Do not output bullet lists, numbered lists, titles outside the required ## 节目简介 heading, or marketing slogans.\n"
-        "5. The summary must be concise and directly usable as the media card summary.\n"
-        "6. The body_markdown must read like a finished program intro, not a note to the editor.\n\n"
+        "4. You may add a short bullet list under ### 核心看点, but never output more than 3 bullet points in total and do not add any other extra headings.\n"
+        "5. The summary must stay lightweight and directly usable as the media card summary.\n"
+        "6. The body_markdown must read like a finished program intro, not a note to the editor.\n"
+        "7. Keep the structure lightweight and readable, with one intro paragraph plus up to 3 concise takeaways.\n\n"
         f"Title: {title.strip() or '未命名节目'}\n"
         f"Kind: {kind.strip() or 'audio'}\n"
         f"Speaker: {speaker.strip() or 'None'}\n"
         f"Series: {series_name.strip() or 'None'}\n\n"
-        f"Source:\n{source_window}\n\nJSON:"
+        f"Source:\n{source_text}\n\nJSON:"
     )
     try:
         raw = _request_gemini_text(
@@ -753,7 +1119,7 @@ def generate_media_text_assets(
         payload = _parse_json_payload(raw)
         if not isinstance(payload, dict):
             raise RuntimeError("Media copy payload must be a JSON object.")
-        summary = _truncate_media_copy_text(str(payload.get("summary") or fallback_summary), max_chars=180) or fallback_summary or title
+        summary = normalize_media_summary_markdown(str(payload.get("summary") or fallback_summary), max_chars=180) or fallback_summary or title
         body_markdown = str(payload.get("body_markdown") or "").strip()
         if not body_markdown:
             body_markdown = fallback_body
@@ -779,6 +1145,100 @@ def generate_media_text_assets(
         }
 
 
+def generate_media_text_assets(
+    *,
+    title: str,
+    kind: str,
+    speaker: str,
+    series_name: str,
+    transcript_markdown: str,
+    script_markdown: str,
+) -> dict[str, object]:
+    source_text = _resolve_media_generation_source_text(
+        transcript_markdown=transcript_markdown,
+        script_markdown=script_markdown,
+    )
+    if not source_text:
+        raise RuntimeError("Media copy source is empty.")
+
+    plain_source = _compact_media_copy_text(source_text)
+    fallback_summary = normalize_media_summary_markdown(plain_source or title, max_chars=160)
+    fallback_body = _build_media_body_fallback(fallback_summary or title, source_text)
+    timestamp_candidates = _extract_media_timestamp_candidates(source_text)
+    if not is_ai_enabled():
+        return {
+            "summary": fallback_summary or title,
+            "body_markdown": fallback_body,
+            "chapters": [],
+            "model": "extractive-fallback",
+        }
+
+    timestamp_hint_block = "\n".join(f"- {label}" for label in timestamp_candidates) or "- None"
+    prompt = (
+        "You are helping a Chinese business knowledge media CMS produce copy for an audio or video program.\n"
+        "Return strict JSON only with this shape:\n"
+        "{\n"
+        '  "summary": "Markdown only, 80-180 Chinese characters, one short paragraph with at most one bold lead phrase",\n'
+        '  "body_markdown": "Markdown only, start with ## 节目简介, include one short intro paragraph, then optionally add ### 核心看点 with 2 or 3 bullet points",\n'
+        '  "chapters": [{"timestamp_label": "00:00", "title": "主题化目录标题"}]\n'
+        "}\n"
+        "Hard requirements:\n"
+        "1. Keep the same language as the source.\n"
+        "2. Do not invent facts beyond the transcript or script.\n"
+        "3. Do not add prefatory phrases such as 以下是、下面是、节目简介如下、本文、这期节目将.\n"
+        "4. You may add a short bullet list under ### 核心看点, but never output more than 3 bullet points in total and do not add any other extra headings.\n"
+        "5. The summary must stay lightweight and directly usable as the media card summary.\n"
+        "6. The body_markdown must read like a finished program intro, not a note to the editor.\n"
+        "7. Keep the structure lightweight and readable, with one intro paragraph plus up to 3 concise takeaways.\n\n"
+        "Chapter rules:\n"
+        "8. Use only timestamps from the detected list below. Never invent a new timestamp.\n"
+        "9. Chapter titles must summarize what that section is about, not quote the raw opening sentence.\n"
+        "10. Remove oral fillers such as 欢迎来到、看完之后、然后、最后 and similar transitions.\n"
+        "11. Keep chapter titles lightweight and outline-style, with no Markdown or numbering.\n"
+        "12. If the source has no usable timestamps, return an empty chapters array.\n\n"
+        "Detected timestamps:\n"
+        f"{timestamp_hint_block}\n\n"
+        f"Title: {title.strip() or '未命名节目'}\n"
+        f"Kind: {kind.strip() or 'audio'}\n"
+        f"Speaker: {speaker.strip() or 'None'}\n"
+        f"Series: {series_name.strip() or 'None'}\n\n"
+        f"Source:\n{source_text}\n\nJSON:"
+    )
+    try:
+        raw = _request_gemini_text(
+            prompt=prompt,
+            model_name=GEMINI_CHAT_MODEL,
+            response_mime_type="application/json",
+        )
+        payload = _parse_json_payload(raw)
+        if not isinstance(payload, dict):
+            raise RuntimeError("Media copy payload must be a JSON object.")
+        summary = normalize_media_summary_markdown(str(payload.get("summary") or fallback_summary), max_chars=180) or fallback_summary or title
+        body_markdown = normalize_media_body_markdown(
+            str(payload.get("body_markdown") or fallback_body),
+            summary=summary,
+            source_text=source_text,
+        )
+        chapters = normalize_media_generated_chapters(
+            payload.get("chapters"),
+            source_text=source_text,
+            max_items=8,
+        )
+        return {
+            "summary": summary,
+            "body_markdown": body_markdown,
+            "chapters": chapters,
+            "model": GEMINI_CHAT_MODEL,
+        }
+    except Exception:
+        return {
+            "summary": fallback_summary or title,
+            "body_markdown": fallback_body,
+            "chapters": [],
+            "model": "extractive-fallback",
+        }
+
+
 def answer_with_sources(question: str, history: str, context_blocks: str, response_language: str = "auto") -> str:
     language_instruction = "Use the same language as the user question."
     if response_language == "zh":
@@ -789,7 +1249,8 @@ def answer_with_sources(question: str, history: str, context_blocks: str, respon
         "You are a business knowledge assistant.\n"
         "Answer only from the supplied materials and never invent facts.\n"
         "If the evidence is insufficient, say that clearly.\n"
-        "Respond in Markdown and cite sources with [1], [2], etc.\n"
+        "Respond in Markdown, but do not use source numbers, bracket citations, or a section called Sources/来源.\n"
+        "Use valid Markdown only. Never leave unmatched ** or __ markers.\n"
         f"{language_instruction}\n\n"
         "Conversation history:\n{history}\n\n"
         "User question:\n{question}\n\n"
@@ -940,12 +1401,12 @@ def translate_article_to_english(title: str, excerpt: str, content: str) -> dict
         "Preserve structure, headings, lists, quotations, and paragraph breaks.\n"
         "Do not invent facts and do not omit visible source content.\n"
         "Return strict JSON only with this shape:\n"
-        "{\n"
+        "{{\n"
         '  "title": "English title",\n'
         '  "excerpt": "English deck or short intro",\n'
         '  "summary": "Markdown summary in English",\n'
         '  "content": "Full translated content in Markdown"\n'
-        "}\n\n"
+        "}}\n\n"
         "Source title:\n{title}\n\n"
         "Source excerpt:\n{excerpt}\n\n"
         "Source content:\n{content}\n\nJSON:"
@@ -966,6 +1427,69 @@ def translate_article_to_english(title: str, excerpt: str, content: str) -> dict
 
     if not translated_summary:
         translated_summary = translated_excerpt or translated_content.splitlines()[0]
+
+    return {
+        "title": translated_title,
+        "excerpt": translated_excerpt,
+        "summary": translated_summary,
+        "content": translated_content,
+        "model": GEMINI_FLASH_MODEL,
+    }
+
+
+def translate_editorial_assets_to_english(
+    title: str,
+    excerpt: str,
+    summary_markdown: str,
+    content_markdown: str,
+) -> dict[str, str]:
+    flash_llm = get_flash_llm()
+    if flash_llm is None:
+        raise RuntimeError("Gemini Flash translation is not configured.")
+
+    normalized_summary = str(summary_markdown or "").strip()
+    normalized_content = str(content_markdown or "").strip()
+    if not normalized_summary:
+        raise RuntimeError("Chinese summary is empty and cannot be translated.")
+    if not normalized_content:
+        raise RuntimeError("Chinese content is empty and cannot be translated.")
+
+    prompt = (
+        "You are translating an editorial draft for Fudan Business Knowledge into polished publication-quality English.\n"
+        "This is an editorial translation task, not a rewrite.\n"
+        "Translate the Chinese title, deck, summary markdown, and full body markdown into English.\n"
+        "Preserve the original meaning, argument order, headings, bullet lists, tables, quotations, and paragraph breaks.\n"
+        "Do not omit any meaningful content. Do not invent facts. Do not add commentary.\n"
+        "Return strict JSON only with this shape:\n"
+        "{{\n"
+        '  "title": "English title",\n'
+        '  "excerpt": "English deck or short intro",\n'
+        '  "summary": "English markdown summary translated from the Chinese summary",\n'
+        '  "content": "Full English markdown body translated from the Chinese body"\n'
+        "}}\n\n"
+        "Chinese title:\n{title}\n\n"
+        "Chinese deck:\n{excerpt}\n\n"
+        "Chinese summary markdown:\n{summary_markdown}\n\n"
+        "Chinese body markdown:\n{content_markdown}\n\nJSON:"
+    )
+    raw = _invoke_prompt(
+        prompt,
+        {
+            "title": title or "",
+            "excerpt": excerpt or "",
+            "summary_markdown": normalized_summary,
+            "content_markdown": normalized_content,
+        },
+        llm=flash_llm,
+    )
+    payload = _parse_json_payload(raw)
+    if not isinstance(payload, dict):
+        raise RuntimeError("Gemini Flash returned an invalid editorial translation payload.")
+
+    translated_title = str(payload.get("title") or "").strip() or str(title or "").strip()
+    translated_excerpt = str(payload.get("excerpt") or "").strip() or str(excerpt or "").strip()
+    translated_summary = str(payload.get("summary") or "").strip() or normalized_summary
+    translated_content = str(payload.get("content") or "").strip() or normalized_content
 
     return {
         "title": translated_title,

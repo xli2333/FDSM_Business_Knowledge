@@ -1,7 +1,10 @@
 import {
+  BookOpen,
   Crown,
+  Database,
   Film,
   Headphones,
+  LayoutGrid,
   LogIn,
   LogOut,
   MessageSquare,
@@ -68,74 +71,113 @@ function LanguageSwitch() {
   )
 }
 
-function Navbar() {
-  const navigate = useNavigate()
-  const [query, setQuery] = useState('')
-  const { t, language } = useLanguage()
-  const {
-    authEnabled,
-    isAuthenticated,
-    membership,
-    businessProfile,
-    roleHomePath,
-    isAdmin,
-    signOut,
-    user,
-    canUseAiAssistant,
-  } = useAuth()
-
-  const isEnglish = language === 'en'
-  const roleTier = resolveRoleTier({ membership, isAuthenticated })
-  const roleExperience = getRoleExperience(roleTier, isEnglish)
-  const defaultSearchMode = membership?.can_access_paid || isAdmin ? 'smart' : 'exact'
-  const discoveryNavItems = [
+function buildDiscoveryNavItems(isEnglish) {
+  return [
     { label: isEnglish ? 'Topic Square' : '专题广场', to: '/topics' },
     { label: isEnglish ? 'Deep Insights' : '深度洞察', to: '/column/insights' },
     { label: isEnglish ? 'Industry Watch' : '行业观察', to: '/column/industry' },
     { label: isEnglish ? 'Research Frontiers' : '学术前沿', to: '/column/research' },
     { label: isEnglish ? "Dean's View" : '院长说', to: '/column/deans-view' },
   ]
+}
+
+function buildDesktopActionItems({ canUseAiAssistant, isAdmin, isEnglish, roleTier }) {
+  if (isAdmin) {
+    return [
+      { label: isEnglish ? 'Admin' : '管理总览', to: '/admin', icon: Shield, tone: 'emerald' },
+      { label: isEnglish ? 'Content Ops' : '内容运营', to: '/admin/content-ops', icon: LayoutGrid, tone: 'plain' },
+      ...(canUseAiAssistant
+        ? [
+            { label: isEnglish ? 'AI Assistant' : 'AI 助理', to: '/chat', icon: MessageSquare, tone: 'blue' },
+            { label: isEnglish ? 'Knowledge Base' : '我的知识库', to: '/me/knowledge', icon: BookOpen, tone: 'orange' },
+          ]
+        : []),
+      { label: isEnglish ? 'Editorial' : '文章后台', to: '/editorial', icon: PenTool, tone: 'blue' },
+      { label: isEnglish ? 'Media Studio' : '媒体后台', to: '/media-studio', icon: Film, tone: 'plain' },
+      { label: isEnglish ? 'RAG Console' : 'RAG 后台', to: '/admin/rag', icon: Database, tone: 'plain' },
+      { label: isEnglish ? 'Leads' : '销售线索', to: '/commercial/leads', icon: Sparkles, tone: 'plain' },
+    ]
+  }
+
+  if (roleTier === 'paid_member') {
+    return [
+      { label: isEnglish ? 'Membership' : '会员空间', to: '/membership', icon: Crown, tone: 'orange' },
+      ...(canUseAiAssistant
+        ? [
+            { label: isEnglish ? 'AI Assistant' : 'AI 助理', to: '/chat', icon: MessageSquare, tone: 'blue' },
+            { label: isEnglish ? 'Knowledge Base' : '我的知识库', to: '/me/knowledge', icon: BookOpen, tone: 'orange' },
+          ]
+        : []),
+      { label: isEnglish ? 'My Library' : '我的资料库', to: '/me', icon: UserRound, tone: 'plain' },
+    ]
+  }
+
+  if (roleTier === 'free_member') {
+    return [
+      { label: isEnglish ? 'My Library' : '我的资料库', to: '/me', icon: UserRound, tone: 'blue' },
+      { label: isEnglish ? 'Following' : '我的关注', to: '/following', icon: Sparkles, tone: 'plain' },
+      { label: isEnglish ? 'Audio' : '音频', to: '/audio', icon: Headphones, tone: 'plain' },
+      { label: isEnglish ? 'Video' : '视频', to: '/video', icon: Film, tone: 'plain' },
+      { label: isEnglish ? 'Upgrade' : '升级会员', to: '/membership', icon: Crown, tone: 'orange' },
+      { label: isEnglish ? 'Commercial' : '商业方案', to: '/commercial', icon: Sparkles, tone: 'plain' },
+    ]
+  }
+
+  return [
+    { label: isEnglish ? 'Login' : '登录中心', to: '/login', icon: LogIn, tone: 'blue' },
+    { label: isEnglish ? 'Membership' : '会员方案', to: '/membership', icon: UserRound, tone: 'plain' },
+    { label: isEnglish ? 'Audio' : '音频', to: '/audio', icon: Headphones, tone: 'plain' },
+    { label: isEnglish ? 'Video' : '视频', to: '/video', icon: Film, tone: 'plain' },
+  ]
+}
+
+function resolveDesktopActionClass(isActive, tone = 'plain') {
+  const base =
+    'inline-flex items-center gap-2 rounded-full border border-transparent bg-transparent px-4 py-2 text-sm font-semibold transition'
+
+  if (!isActive) {
+    return `${base} text-slate-500 hover:border-slate-200 hover:bg-white hover:text-fudan-blue`
+  }
+
+  if (tone === 'orange') {
+    return `${base} border border-fudan-orange/25 bg-fudan-orange/10 text-fudan-orange`
+  }
+  if (tone === 'blue') {
+    return `${base} border border-fudan-blue/20 bg-fudan-blue/10 text-fudan-blue`
+  }
+  if (tone === 'emerald') {
+    return `${base} border border-emerald-200 bg-emerald-50 text-emerald-700`
+  }
+  return `${base} border border-slate-200 bg-white text-fudan-blue`
+}
+
+function Navbar() {
+  const navigate = useNavigate()
+  const [query, setQuery] = useState('')
+  const { t, language } = useLanguage()
+  const {
+    authEnabled,
+    businessProfile,
+    canUseAiAssistant,
+    isAdmin,
+    isAuthenticated,
+    membership,
+    roleHomePath,
+    signOut,
+    user,
+  } = useAuth()
+
+  const isEnglish = language === 'en'
+  const roleTier = resolveRoleTier({ membership, isAuthenticated })
+  const roleExperience = getRoleExperience(roleTier, isEnglish)
+  const defaultSearchMode = membership?.can_access_paid || isAdmin ? 'smart' : 'exact'
+  const discoveryNavItems = buildDiscoveryNavItems(isEnglish)
   const navItems = [...roleExperience.navLinks.map((item) => (item.to === '/topics' ? { ...item, label: isEnglish ? 'Topic Square' : '专题广场' } : item)), ...discoveryNavItems].filter(
     (item, index, items) => items.findIndex((candidate) => candidate.to === item.to) === index,
   )
   const roleHomeTarget = isAuthenticated ? (roleHomePath && roleHomePath !== '/' ? roleHomePath : roleExperience.entryPath) : '/login'
-
-  const desktopActionItems = isAdmin
-    ? [
-        { label: isEnglish ? 'Admin' : '管理总览', to: '/admin', icon: Shield, className: 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' },
-        ...(canUseAiAssistant
-          ? [{ label: isEnglish ? 'AI Assistant' : 'AI 助理', to: '/chat', icon: MessageSquare, className: 'border border-fudan-orange/20 bg-fudan-orange/10 text-fudan-orange hover:bg-fudan-orange/15' }]
-          : []),
-        { label: isEnglish ? 'Editorial' : '文章后台', to: '/editorial', icon: PenTool, className: 'border border-fudan-blue/20 bg-fudan-blue/10 text-fudan-blue hover:bg-fudan-blue/15' },
-        { label: isEnglish ? 'Media Studio' : '媒体后台', to: '/media-studio', icon: Film, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-        { label: isEnglish ? 'Leads' : '销售线索', to: '/commercial/leads', icon: Sparkles, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-      ]
-    : roleTier === 'paid_member'
-      ? [
-          { label: isEnglish ? 'Membership' : '会员空间', to: '/membership', icon: Crown, className: 'border border-fudan-orange/25 bg-fudan-orange/10 text-fudan-orange hover:bg-fudan-orange/15' },
-          ...(canUseAiAssistant
-            ? [{ label: isEnglish ? 'AI Assistant' : 'AI 助理', to: '/chat', icon: MessageSquare, className: 'border border-fudan-blue/20 bg-fudan-blue/10 text-fudan-blue hover:bg-fudan-blue/15' }]
-            : []),
-          { label: isEnglish ? 'Audio' : '音频', to: '/audio', icon: Headphones, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-          { label: isEnglish ? 'Video' : '视频', to: '/video', icon: Film, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-          { label: isEnglish ? 'My Library' : '我的资产', to: '/me', icon: UserRound, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-        ]
-      : roleTier === 'free_member'
-        ? [
-            { label: isEnglish ? 'My Library' : '我的资产', to: '/me', icon: UserRound, className: 'border border-fudan-blue/20 bg-fudan-blue/10 text-fudan-blue hover:bg-fudan-blue/15' },
-            { label: isEnglish ? 'Following' : '我的关注', to: '/following', icon: Sparkles, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-            { label: isEnglish ? 'Audio' : '音频', to: '/audio', icon: Headphones, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-            { label: isEnglish ? 'Video' : '视频', to: '/video', icon: Film, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-            { label: isEnglish ? 'Upgrade' : '升级会员', to: '/membership', icon: Crown, className: 'border border-fudan-orange/20 bg-fudan-orange/10 text-fudan-orange hover:bg-fudan-orange/15' },
-            { label: isEnglish ? 'Commercial' : '商业方案', to: '/commercial', icon: Sparkles, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-          ]
-        : [
-            { label: isEnglish ? 'Login' : '登录中心', to: '/login', icon: LogIn, className: 'border border-fudan-blue/15 bg-fudan-blue text-white hover:bg-fudan-dark' },
-            { label: isEnglish ? 'Membership' : '会员方案', to: '/membership', icon: UserRound, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-            { label: isEnglish ? 'Audio' : '音频', to: '/audio', icon: Headphones, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-            { label: isEnglish ? 'Video' : '视频', to: '/video', icon: Film, className: 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-blue/30' },
-          ]
-
+  const desktopActionItems = buildDesktopActionItems({ canUseAiAssistant, isAdmin, isEnglish, roleTier })
+  const showRoleHomeDesktopLink = !desktopActionItems.some((item) => item.to === roleHomeTarget)
   const mobileActionItems = desktopActionItems.map((item) => ({ label: item.label, to: item.to }))
   const mobileNavItems = [...navItems, ...mobileActionItems].filter((item, index, items) => items.findIndex((candidate) => candidate.to === item.to) === index)
   const membershipClass = MEMBERSHIP_STYLES[membership?.tier] || MEMBERSHIP_STYLES.guest
@@ -210,34 +252,39 @@ function Navbar() {
               />
             </form>
 
-            <div className="hidden flex-wrap items-center justify-end gap-2 xl:flex">
+            <div key={`desktop-actions-${language}`} className="hidden flex-wrap items-center justify-end gap-2 xl:flex">
               {desktopActionItems.map((item) => {
                 const Icon = item.icon
                 return (
-                  <Link
-                    key={`desktop-${item.to}`}
+                  <NavLink
+                    key={`desktop-${language}-${item.to}`}
                     to={item.to}
-                    className={`inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition ${item.className}`}
+                    data-navbar-desktop-action={item.to}
+                    className={({ isActive }) => resolveDesktopActionClass(isActive, item.tone)}
                   >
                     <Icon size={16} />
                     {item.label}
-                  </Link>
+                  </NavLink>
                 )
               })}
 
-              <Link
-                to={roleHomeTarget}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-fudan-blue/30"
-              >
-                {roleHomeLabel}
-              </Link>
+              {showRoleHomeDesktopLink ? (
+                <NavLink
+                  key={`desktop-role-home-${language}`}
+                  to={roleHomeTarget}
+                  data-navbar-role-home
+                  className={({ isActive }) => resolveDesktopActionClass(isActive, 'plain')}
+                >
+                  {roleHomeLabel}
+                </NavLink>
+              ) : null}
             </div>
           </div>
 
-          <nav className="hidden flex-wrap items-center gap-x-5 gap-y-2 xl:flex">
+          <nav key={`primary-nav-${language}`} className="hidden flex-wrap items-center gap-x-5 gap-y-2 xl:flex">
             {navItems.map((item) => (
               <NavLink
-                key={item.to}
+                key={`${language}-${item.to}`}
                 to={item.to}
                 className={({ isActive }) =>
                   ['text-sm font-semibold tracking-[0.08em] transition', isActive ? 'text-fudan-blue' : 'text-slate-500 hover:text-fudan-blue'].join(' ')
@@ -249,10 +296,10 @@ function Navbar() {
           </nav>
 
           <div className="xl:hidden">
-            <nav className="flex gap-3 overflow-x-auto pb-1">
+            <nav key={`mobile-nav-${language}`} className="flex gap-3 overflow-x-auto pb-1">
               {mobileNavItems.map((item) => (
                 <NavLink
-                  key={`mobile-${item.to}`}
+                  key={`mobile-${language}-${item.to}`}
                   to={item.to}
                   className={({ isActive }) =>
                     [

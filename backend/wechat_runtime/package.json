@@ -1,0 +1,17 @@
+{
+  "name": "fdsm-wechat-runtime",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "install:runtime": "npm install"
+  },
+  "dependencies": {
+    "@google/genai": "^1.44.0",
+    "sharp": "^0.34.5",
+    "undici": "^7.22.0"
+  }
+}

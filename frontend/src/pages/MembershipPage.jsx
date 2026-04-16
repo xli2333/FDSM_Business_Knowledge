@@ -1,7 +1,7 @@
 import { ArrowRight, CalendarDays, CheckCircle2, CreditCard, FileText, Headphones, Shield, Sparkles, UserRound } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { createBillingCheckoutIntent, fetchBillingPlans, fetchBillingProfile } from '../api/index.js'
+import { createBillingCheckoutIntent, fetchBillingPlans, fetchBillingProfile, fetchMyDashboard } from '../api/index.js'
 import { useAuth } from '../auth/AuthContext.js'
 import { useLanguage } from '../i18n/LanguageContext.js'
 import { getRoleExperience, resolveRoleTier } from '../lib/roleExperience.js'
@@ -94,6 +94,7 @@ function MembershipPage() {
   const { isEnglish } = useLanguage()
   const [planPayload, setPlanPayload] = useState(null)
   const [billingPayload, setBillingPayload] = useState(null)
+  const [assetDashboard, setAssetDashboard] = useState(null)
   const [loading, setLoading] = useState(true)
   const [checkoutBusy, setCheckoutBusy] = useState('')
   const [checkoutMessage, setCheckoutMessage] = useState('')
@@ -109,10 +110,15 @@ function MembershipPage() {
       setError('')
       try {
         const language = isEnglish ? 'en' : 'zh'
-        const [plans, billing] = await Promise.all([fetchBillingPlans(language), fetchBillingProfile(accessToken, language)])
+        const [plans, billing, dashboard] = await Promise.all([
+          fetchBillingPlans(language),
+          fetchBillingProfile(accessToken, language),
+          isAuthenticated ? fetchMyDashboard(accessToken).catch(() => null) : Promise.resolve(null),
+        ])
         if (!mounted) return
         setPlanPayload(plans)
         setBillingPayload(billing)
+        setAssetDashboard(dashboard)
       } catch {
         if (!mounted) return
         setError(byLanguage(isEnglish, '会员与账单信息加载失败。', 'Failed to load membership and billing data.'))
@@ -124,7 +130,7 @@ function MembershipPage() {
     return () => {
       mounted = false
     }
-  }, [accessToken, isEnglish])
+  }, [accessToken, isAuthenticated, isEnglish])
 
   const currentMembership = billingPayload?.membership || membership || {}
   const currentTier = currentMembership.tier || membership?.tier || 'guest'
@@ -294,6 +300,34 @@ function MembershipPage() {
     return roleExperience.quickActions.map((item) => ({ ...item, icon: Sparkles }))
   }, [canUseAiAssistant, currentTier, isEnglish, roleExperience.quickActions])
 
+  const memberAssetLinks = useMemo(() => {
+    if (!['free_member', 'paid_member'].includes(currentTier)) return []
+    const summary = assetDashboard?.asset_summary || {}
+    return [
+      {
+        key: 'bookmarks',
+        label: byLanguage(isEnglish, '我的收藏', 'My bookmarks'),
+        path: '/me?tab=bookmarks',
+        value: summary.bookmark_count ?? 0,
+        description: byLanguage(isEnglish, '打开收藏文章流，并继续点回文章详情。', 'Open your bookmarked article flow and jump back into any article.'),
+      },
+      {
+        key: 'likes',
+        label: byLanguage(isEnglish, '我的点赞', 'My likes'),
+        path: '/me?tab=likes',
+        value: summary.like_count ?? 0,
+        description: byLanguage(isEnglish, '查看你认可过的文章，并继续回到原文。', 'Review the articles you endorsed and return to the original story.'),
+      },
+      {
+        key: 'history',
+        label: byLanguage(isEnglish, '阅读历史', 'Reading history'),
+        path: '/me?tab=history',
+        value: summary.recent_view_count ?? 0,
+        description: byLanguage(isEnglish, '回到最近看过的文章流，继续阅读。', 'Return to your recent reading flow and continue where you left off.'),
+      },
+    ]
+  }, [assetDashboard, currentTier, isEnglish])
+
   const memberWorkspaceTitle =
     currentTier === 'free_member'
       ? byLanguage(isEnglish, '已开通的会员权益', 'Your unlocked member benefits')
@@ -425,6 +459,37 @@ function MembershipPage() {
           </Link>
         ))}
       </section>
+
+      {memberAssetLinks.length ? (
+        <section className="mt-8">
+          <div className="mb-4 flex items-center gap-3">
+            <div className="rounded-full bg-fudan-blue/10 p-3 text-fudan-blue">
+              <UserRound size={20} />
+            </div>
+            <div>
+              <div className="section-kicker">{byLanguage(isEnglish, '阅读资产', 'Reading assets')}</div>
+              <h2 className="font-serif text-3xl font-black text-fudan-blue">
+                {byLanguage(isEnglish, '收藏、点赞和历史都能直接点开', 'Bookmarks, likes, and history open directly')}
+              </h2>
+            </div>
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            {memberAssetLinks.map((item) => (
+              <Link
+                key={item.key}
+                to={item.path}
+                className="rounded-[1.35rem] border border-slate-200 bg-white px-6 py-6 text-left transition hover:border-fudan-blue/25 hover:bg-fudan-blue/5"
+                data-membership-asset-link={item.key}
+              >
+                <div className="text-xs uppercase tracking-[0.18em] text-fudan-orange">{item.label}</div>
+                <div className="mt-3 font-serif text-4xl font-black text-fudan-blue">{item.value}</div>
+                <div className="mt-3 text-sm leading-7 text-slate-600">{item.description}</div>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {showMarketplace ? (
         <section className="mt-8 grid gap-6 lg:grid-cols-[0.72fr_1.28fr]">

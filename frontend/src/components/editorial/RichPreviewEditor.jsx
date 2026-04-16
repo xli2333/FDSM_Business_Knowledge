@@ -245,6 +245,21 @@ function buildDocumentPayload(html) {
   }
 }
 
+function measureFrameHeight(doc, minFrameHeight) {
+  if (!doc) return minFrameHeight
+  const body = doc.body
+  const root = doc.documentElement
+  const measured = Math.max(
+    body?.scrollHeight || 0,
+    body?.offsetHeight || 0,
+    body?.clientHeight || 0,
+    root?.scrollHeight || 0,
+    root?.offsetHeight || 0,
+    root?.clientHeight || 0,
+  )
+  return Math.max(minFrameHeight, measured + 8)
+}
+
 function resolveSeed({ initialHtml, initialDocument, fallbackText, isEnglish }) {
   const documentHtml =
     initialDocument && typeof initialDocument === 'object' && typeof initialDocument.html === 'string'
@@ -397,6 +412,7 @@ function RichPreviewEditor({
   previewPanelTitle,
   editableFrameTitle = 'Editable editorial document frame',
   previewFrameTitle = 'Editorial preview frame',
+  minFrameHeight = 960,
   onChange,
 }) {
   const [mode, setMode] = useState('edit')
@@ -406,7 +422,10 @@ function RichPreviewEditor({
   const [previewHtml, setPreviewHtml] = useState(seedSnapshot.html)
   const [toolbarState, setToolbarState] = useState(DEFAULT_TOOLBAR_STATE)
   const [editableReady, setEditableReady] = useState(false)
+  const [editableFrameHeight, setEditableFrameHeight] = useState(minFrameHeight)
+  const [previewFrameHeight, setPreviewFrameHeight] = useState(minFrameHeight)
   const editableFrameRef = useRef(null)
+  const previewFrameRef = useRef(null)
   const editableCleanupRef = useRef(() => {})
   const latestHtmlRef = useRef(seedSnapshot.html)
   const onChangeRef = useRef(onChange)
@@ -429,15 +448,30 @@ function RichPreviewEditor({
     setPreviewHtml(nextSeed.html)
     setToolbarState(DEFAULT_TOOLBAR_STATE)
     setEditableReady(false)
+    setEditableFrameHeight(minFrameHeight)
+    setPreviewFrameHeight(minFrameHeight)
     onChangeRef.current?.({
       html: nextSeed.html,
       document: buildDocumentPayload(nextSeed.html),
       text: extractPlainTextFromHtml(nextSeed.html),
       dirty: false,
     })
-  }, [contentVersion])
+  }, [contentVersion, fallbackText, initialDocument, initialHtml, isEnglish, minFrameHeight])
 
   useEffect(() => () => editableCleanupRef.current?.(), [])
+
+  useEffect(() => {
+    setEditableFrameHeight((current) => Math.max(current, minFrameHeight))
+    setPreviewFrameHeight((current) => Math.max(current, minFrameHeight))
+  }, [minFrameHeight])
+
+  const updateEditableFrameHeight = (doc) => {
+    setEditableFrameHeight(measureFrameHeight(doc, minFrameHeight))
+  }
+
+  const updatePreviewFrameHeight = (doc) => {
+    setPreviewFrameHeight(measureFrameHeight(doc, minFrameHeight))
+  }
 
   const syncFromDocument = (doc, dirty) => {
     const nextHtml = serializeEditableDocument(doc)
@@ -445,6 +479,7 @@ function RichPreviewEditor({
     latestHtmlRef.current = nextHtml
     setPreviewHtml((current) => (current === nextHtml ? current : nextHtml))
     setToolbarState(collectToolbarState(doc))
+    updateEditableFrameHeight(doc)
     onChangeRef.current?.({
       html: nextHtml,
       document: buildDocumentPayload(nextHtml),
@@ -532,6 +567,17 @@ function RichPreviewEditor({
     }
 
     win.requestAnimationFrame(armDocument)
+  }
+
+  const handlePreviewLoad = () => {
+    const doc = previewFrameRef.current?.contentDocument
+    if (!doc) return
+    const win = previewFrameRef.current?.contentWindow
+    if (win?.requestAnimationFrame) {
+      win.requestAnimationFrame(() => updatePreviewFrameHeight(doc))
+      return
+    }
+    updatePreviewFrameHeight(doc)
   }
 
   const withEditableDocument = (callback) => {
@@ -773,7 +819,7 @@ function RichPreviewEditor({
         <div className={mode === 'preview' ? 'hidden' : ''}>
           <div className="overflow-hidden rounded-[1.8rem] border border-slate-200/70 bg-slate-50">
             <div className="border-b border-slate-200/70 bg-white px-5 py-4 text-sm font-semibold text-slate-600">{resolvedEditablePanelTitle}</div>
-            <div className="editorial-rich-canvas">
+            <div className="editorial-rich-canvas" style={{ minHeight: `${minFrameHeight}px` }}>
               <iframe
                 key={contentVersion}
                 ref={editableFrameRef}
@@ -781,6 +827,7 @@ function RichPreviewEditor({
                 className="editorial-rich-frame"
                 srcDoc={seedSnapshot.html}
                 onLoad={handleEditableLoad}
+                style={{ height: `${editableFrameHeight}px` }}
               />
             </div>
           </div>
@@ -790,7 +837,16 @@ function RichPreviewEditor({
           <div className={mode === 'preview' ? '' : ''}>
             <div className="overflow-hidden rounded-[1.8rem] border border-slate-200/70 bg-slate-50">
               <div className="border-b border-slate-200/70 bg-white px-5 py-4 text-sm font-semibold text-slate-600">{resolvedPreviewPanelTitle}</div>
-              <iframe title={previewFrameTitle} className="editorial-rich-frame" srcDoc={previewHtml || latestHtmlRef.current || seedSnapshot.html} />
+              <div className="editorial-rich-canvas" style={{ minHeight: `${minFrameHeight}px` }}>
+                <iframe
+                  ref={previewFrameRef}
+                  title={previewFrameTitle}
+                  className="editorial-rich-frame"
+                  srcDoc={previewHtml || latestHtmlRef.current || seedSnapshot.html}
+                  onLoad={handlePreviewLoad}
+                  style={{ height: `${previewFrameHeight}px` }}
+                />
+              </div>
             </div>
           </div>
         ) : null}

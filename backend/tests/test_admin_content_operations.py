@@ -53,6 +53,7 @@ def _insert_article(
     publish_date: str,
     excerpt: str = "Summary",
     content: str = "first paragraph\n\nsecond paragraph",
+    cover_image_path: str | None = None,
 ) -> int:
     with connection_scope() as connection:
         article_id = int(connection.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM articles").fetchone()[0])
@@ -66,7 +67,7 @@ def _insert_article(
                 access_level, view_count, is_featured, created_at, updated_at
             )
             VALUES (?, ?, ?, ?, 'editorial', 'cms', ?, ?, NULL, ?, ?, 'Topic Governance', 'insight', 'Editorial',
-                    'Fudan Business Knowledge', '', '', 'Fudan Business Knowledge', ?, ?, NULL,
+                    'Fudan Business Knowledge', '', '', 'Fudan Business Knowledge', ?, ?, ?,
                     'public', 0, 0, ?, ?)
             """,
             (
@@ -80,6 +81,7 @@ def _insert_article(
                 excerpt,
                 f"{title} {excerpt} {content}",
                 max(1, len(content.replace("\n", ""))),
+                cover_image_path,
                 now,
                 now,
             ),
@@ -228,6 +230,101 @@ def test_editorial_selected_topics_publish_into_topic_articles(client):
             (article_id,),
         ).fetchall()
     assert [(int(row["topic_id"]), int(row["sort_order"])) for row in republished_rows] == [(topic_b, 0)]
+
+
+def test_legacy_cover_images_fall_back_to_default_card_cover_until_new_editorial_publish(client):
+    legacy_article_id = _insert_article(
+        title="Legacy Cover Should Hide",
+        slug="legacy-cover-should-hide",
+        publish_date="2026-04-11",
+        cover_image_path="/legacy-covers/legacy-cover.png",
+    )
+    new_editorial_article_id = _insert_article(
+        title="New Editorial Cover Should Stay",
+        slug="new-editorial-cover-should-stay",
+        publish_date="2026-04-12",
+        cover_image_path="/editorial-uploads/covers/new-cover.png",
+    )
+
+    with connection_scope() as connection:
+        now = "2026-04-12T09:00:00"
+        connection.execute(
+            """
+            INSERT INTO editorial_articles (
+                article_id,
+                source_article_id,
+                slug,
+                title,
+                publish_date,
+                cover_image_url,
+                source_markdown,
+                content_markdown,
+                plain_text_content,
+                excerpt,
+                status,
+                draft_box_state,
+                workflow_status,
+                created_at,
+                updated_at,
+                published_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'legacy source', 'legacy content', 'legacy content', 'legacy excerpt',
+                    'published', 'archived', 'published', ?, ?, ?)
+            """,
+            (
+                legacy_article_id,
+                legacy_article_id,
+                "legacy-cover-should-hide-editorial",
+                "Legacy Cover Should Hide",
+                "2026-04-11",
+                "/editorial-uploads/covers/legacy-cover.png",
+                now,
+                now,
+                now,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO editorial_articles (
+                article_id,
+                source_article_id,
+                slug,
+                title,
+                publish_date,
+                cover_image_url,
+                source_markdown,
+                content_markdown,
+                plain_text_content,
+                excerpt,
+                status,
+                draft_box_state,
+                workflow_status,
+                created_at,
+                updated_at,
+                published_at
+            )
+            VALUES (?, NULL, ?, ?, ?, ?, 'new source', 'new content', 'new content', 'new excerpt',
+                    'published', 'archived', 'published', ?, ?, ?)
+            """,
+            (
+                new_editorial_article_id,
+                "new-editorial-cover-should-stay",
+                "New Editorial Cover Should Stay",
+                "2026-04-12",
+                "/editorial-uploads/covers/new-cover.png",
+                now,
+                now,
+                now,
+            ),
+        )
+        connection.commit()
+
+    latest_response = client.get("/api/articles/latest?limit=20&offset=0&language=zh")
+    assert latest_response.status_code == 200
+    cards = {item["id"]: item for item in latest_response.json()}
+
+    assert cards[legacy_article_id]["cover_url"] is None
+    assert cards[new_editorial_article_id]["cover_url"] == f"/api/article/{new_editorial_article_id}/cover"
 
 
 def test_admin_content_operations_drive_home_feed_sections(client):

@@ -1,5 +1,6 @@
 import {
   ArrowRight,
+  BookOpen,
   Bookmark,
   Building2,
   Calendar,
@@ -16,6 +17,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext.js'
 import { fetchArticle, fetchArticleTranslation, reopenEditorialSourceArticle, submitArticleReaction } from '../api/index.js'
+import KnowledgeThemeComposerModal from '../components/knowledge/KnowledgeThemeComposerModal.jsx'
 import AutoHeightPreviewFrame from '../components/shared/AutoHeightPreviewFrame.jsx'
 import ArticleCard from '../components/shared/ArticleCard.jsx'
 import TagBadge from '../components/shared/TagBadge.jsx'
@@ -264,7 +266,7 @@ function MetricPill({ icon: Icon, value, tone = 'blue' }) {
 function ArticlePage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { accessToken, authEnabled, isAdmin, isAuthenticated, membership, openAuthDialog } = useAuth()
+  const { accessToken, authEnabled, canUseAiAssistant, isAdmin, isAuthenticated, membership, openAuthDialog } = useAuth()
   const { language, isEnglish, setLanguage, t } = useLanguage()
   const [article, setArticle] = useState(null)
   const [busyReaction, setBusyReaction] = useState('')
@@ -278,6 +280,7 @@ function ArticlePage() {
   const [relatedTranslationsLoading, setRelatedTranslationsLoading] = useState(false)
   const [summaryExpanded, setSummaryExpanded] = useState(false)
   const [reopenBusy, setReopenBusy] = useState(false)
+  const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false)
 
   useEffect(() => {
     if (!id) return undefined
@@ -422,6 +425,28 @@ function ArticlePage() {
     } finally {
       setReopenBusy(false)
     }
+  }
+
+  const handleOpenKnowledgeModal = () => {
+    if (!article?.id) return
+    if (!isAuthenticated) {
+      openAuthDialog()
+      setStatusHint(
+        isEnglish ? 'Sign in first, then create your own knowledge theme.' : '请先登录，再创建并使用自己的知识库主题。',
+      )
+      return
+    }
+    if (!canUseAiAssistant) {
+      setStatusHint(
+        isEnglish
+          ? 'Private knowledge themes are available to paid members and admins. Upgrade first to continue.'
+          : '用户私有知识库主题仅向付费会员和管理员开放，请先升级会员后继续。',
+      )
+      navigate('/membership')
+      return
+    }
+    setStatusHint('')
+    setKnowledgeModalOpen(true)
   }
 
   if (pageLoading) {
@@ -747,6 +772,20 @@ function ArticlePage() {
                 <Bookmark size={15} />
                 {engagement.bookmarked_by_me ? t('article.bookmarked') : t('article.bookmark')}
               </button>
+              <button
+                type="button"
+                onClick={handleOpenKnowledgeModal}
+                className={[
+                  'inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition',
+                  canUseAiAssistant
+                    ? 'border border-fudan-orange/20 bg-fudan-orange/10 text-fudan-orange hover:bg-fudan-orange/15'
+                    : 'border border-slate-200 bg-white text-slate-600 hover:border-fudan-orange/30',
+                ].join(' ')}
+                data-knowledge-open-modal
+              >
+                <BookOpen size={15} />
+                {isEnglish ? 'Add to knowledge base' : '加入知识库'}
+              </button>
             </div>
             {statusHint ? <div className="mt-3 text-sm text-slate-500">{statusHint}</div> : null}
             {isEnglish ? <div className="mt-3 text-sm leading-7 text-slate-500">{t('article.translationHint')}</div> : null}
@@ -806,6 +845,14 @@ function ArticlePage() {
           </section>
         </aside>
       </div>
+      {article ? (
+        <KnowledgeThemeComposerModal
+          open={knowledgeModalOpen}
+          onClose={() => setKnowledgeModalOpen(false)}
+          article={article}
+          accessToken={accessToken}
+        />
+      ) : null}
     </div>
   )
 }

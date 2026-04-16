@@ -13,6 +13,7 @@ from backend.models.schemas import (
     MembershipListResponse,
     MembershipSummary,
     MembershipUpdateRequest,
+    RagAdminOverviewResponse,
 )
 from backend.services.billing_service import list_billing_orders
 from backend.services.content_operations_service import (
@@ -22,6 +23,7 @@ from backend.services.content_operations_service import (
     update_trending_config as save_trending_config,
 )
 from backend.services.membership_service import list_memberships, require_admin_profile, update_membership
+from backend.services.rag_admin_service import get_rag_admin_overview
 from backend.services.supabase_auth_service import get_authenticated_user
 from backend.services.user_profile_service import get_admin_overview
 
@@ -115,6 +117,28 @@ def admin_content_operations(
     )
     require_admin_profile(user)
     return get_content_operations_state()
+
+
+@router.get("/rag", response_model=RagAdminOverviewResponse)
+def admin_rag_overview(
+    asset_limit: int = 12,
+    job_limit: int = 12,
+    event_limit: int = 8,
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    user = get_authenticated_user(
+        authorization,
+        debug_user_id=x_debug_user_id,
+        debug_user_email=x_debug_user_email,
+    )
+    require_admin_profile(user)
+    return get_rag_admin_overview(
+        asset_limit=asset_limit,
+        job_limit=job_limit,
+        event_limit=event_limit,
+    )
 
 
 @router.get("/content-ops/candidates", response_model=list[AdminContentEntity])

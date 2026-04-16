@@ -52,10 +52,28 @@ def _organization_slug(name: str) -> str:
     return compact[:40]
 
 
-def article_cover_url(article_id: int, has_cover: bool) -> str | None:
-    if not has_cover:
+def article_cover_url(article_id: int, can_use_manual_cover: bool) -> str | None:
+    if not can_use_manual_cover:
         return None
     return f"/api/article/{article_id}/cover"
+
+
+def _fetch_manual_cover_article_ids(connection, article_ids: list[int]) -> set[int]:
+    if not article_ids:
+        return set()
+    placeholders = ",".join("?" for _ in article_ids)
+    rows = connection.execute(
+        f"""
+        SELECT DISTINCT article_id
+        FROM editorial_articles
+        WHERE status = 'published'
+          AND source_article_id IS NULL
+          AND COALESCE(cover_image_url, '') != ''
+          AND article_id IN ({placeholders})
+        """,
+        article_ids,
+    ).fetchall()
+    return {int(row["article_id"]) for row in rows if row["article_id"] is not None}
 
 
 def _fetch_tag_map(connection, article_ids: list[int]) -> dict[int, list[dict]]:
@@ -339,6 +357,7 @@ def _serialize_articles(
     access_map = _fetch_access_map(connection, article_ids)
     translation_map = _fetch_translation_map(connection, article_ids, language)
     engagement_map = fetch_article_engagement_map(connection, article_ids, user_id=current_user_id)
+    manual_cover_article_ids = _fetch_manual_cover_article_ids(connection, article_ids)
     payload = []
     for row in rows:
         access = build_content_access(access_map.get(row["id"], "public"), membership_profile)
@@ -379,7 +398,7 @@ def _serialize_articles(
                 "view_count": engagement["views"] or row["view_count"] or 0,
                 "like_count": engagement["like_count"],
                 "bookmark_count": engagement["bookmark_count"],
-                "cover_url": article_cover_url(row["id"], bool(row["cover_image_path"])),
+                "cover_url": article_cover_url(row["id"], row["id"] in manual_cover_article_ids),
                 "link": row["link"],
                 "tags": localized_tags,
                 "columns": localized_columns,
@@ -548,6 +567,10 @@ def get_article_detail(
             (article_id,),
         ).fetchall()
         topics = []
+        topic_cover_article_ids = _fetch_manual_cover_article_ids(
+            connection,
+            [int(topic_row["cover_article_id"]) for topic_row in topic_rows if topic_row["cover_article_id"]],
+        )
         for topic_row in topic_rows:
             tags = connection.execute(
                 """
@@ -573,7 +596,7 @@ def get_article_detail(
                     ).fetchone()[0],
                     "cover_article_id": topic_row["cover_article_id"],
                     "cover_url": article_cover_url(
-                        topic_row["cover_article_id"], bool(topic_row["cover_article_id"])
+                        topic_row["cover_article_id"], int(topic_row["cover_article_id"]) in topic_cover_article_ids
                     )
                     if topic_row["cover_article_id"]
                     else None,
@@ -950,6 +973,10 @@ def list_topics(language: str = "zh") -> list[dict]:
                     }
                 )
 
+        topic_cover_article_ids = _fetch_manual_cover_article_ids(
+            connection,
+            [int(row["cover_article_id"]) for row in rows if row["cover_article_id"]],
+        )
         items = []
         for row in rows:
             article_count = connection.execute(
@@ -967,7 +994,7 @@ def list_topics(language: str = "zh") -> list[dict]:
                     "article_count": article_count,
                     "cover_article_id": row["cover_article_id"],
                     "cover_url": article_cover_url(
-                        row["cover_article_id"], bool(row["cover_article_id"])
+                        row["cover_article_id"], int(row["cover_article_id"]) in topic_cover_article_ids
                     )
                     if row["cover_article_id"]
                     else None,
@@ -1082,6 +1109,11 @@ def get_topic_detail(slug: str, page: int = 1, page_size: int = DEFAULT_PAGE_SIZ
                 "优先推荐阅读近年的长文、访谈与案例文章，以把握该主题的最新演进。",
             ]
 
+        topic_cover_article_ids = _fetch_manual_cover_article_ids(
+            connection,
+            [int(topic["cover_article_id"])] if topic["cover_article_id"] else [],
+        )
+
         return {
             "id": topic["id"],
             "title": topic["title"],
@@ -1091,7 +1123,7 @@ def get_topic_detail(slug: str, page: int = 1, page_size: int = DEFAULT_PAGE_SIZ
             "view_count": topic["view_count"] or 0,
             "article_count": total,
             "cover_article_id": topic["cover_article_id"],
-            "cover_url": article_cover_url(topic["cover_article_id"], bool(topic["cover_article_id"]))
+            "cover_url": article_cover_url(topic["cover_article_id"], int(topic["cover_article_id"]) in topic_cover_article_ids)
             if topic["cover_article_id"]
             else None,
             "total": total,

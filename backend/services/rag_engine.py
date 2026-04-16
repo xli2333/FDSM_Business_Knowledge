@@ -20,6 +20,8 @@ from backend.database import connection_scope
 from backend.services import ai_service
 from backend.services.catalog_service import _serialize_articles
 from backend.services.content_localization import contains_cjk, localize_tag_name
+from backend.services.knowledge_ingestion_service import sync_articles_for_rag
+from backend.services.knowledge_retrieval_service import RetrievalScope, retrieve_scope_context
 
 TOKEN_SPLIT_PATTERN = re.compile(r"[\s,，。；;、/|]+")
 TEXT_TOKEN_PATTERN = re.compile(r"[a-z0-9]+|[\u4e00-\u9fff]+", re.IGNORECASE)
@@ -293,18 +295,45 @@ def search_articles(
     sort: str = "relevance",
     page: int = 1,
     page_size: int = DEFAULT_PAGE_SIZE,
+    allowed_article_ids: list[int] | set[int] | tuple[int, ...] | None = None,
 ) -> dict:
     filters = filters or {}
     safe_page = max(page, 1)
     safe_page_size = max(1, min(page_size, MAX_PAGE_SIZE))
+    allowed_ids = {int(value) for value in (allowed_article_ids or [])}
     terms = _build_terms(query)
-    bm25_scores = _bm25_scores(terms)
-    vector_scores = _vector_scores(terms)
     rows = _load_search_rows()
-    matched_rows: list[dict] = []
-    for row in rows:
-        if not _matches_filters(row, filters):
+    filtered_rows: list[dict] = []
+    for base_row in rows:
+        if allowed_ids and int(base_row["id"]) not in allowed_ids:
             continue
+        if not _matches_filters(base_row, filters):
+            continue
+        filtered_rows.append(dict(base_row))
+
+    if not query.strip():
+        if sort == "popularity":
+            filtered_rows.sort(key=lambda item: ((item.get("view_count") or 0), item["publish_date"]), reverse=True)
+        else:
+            filtered_rows.sort(key=lambda item: item["publish_date"], reverse=True)
+        total = len(filtered_rows)
+        start = (safe_page - 1) * safe_page_size
+        page_rows = filtered_rows[start : start + safe_page_size]
+        with connection_scope() as connection:
+            items = _serialize_articles(connection, page_rows, language=language)
+        return {
+            "query": query,
+            "mode": mode,
+            "total": total,
+            "page": safe_page,
+            "page_size": safe_page_size,
+            "query_terms": [],
+            "items": items,
+        }
+
+    bm25_scores = _bm25_scores(terms)
+    matched_rows: list[dict] = []
+    for row in filtered_rows:
         if mode == "exact":
             exact_score = _term_occurrences(row.get("title"), query) * 10 + _term_occurrences(
                 row.get("content"), query
@@ -315,8 +344,7 @@ def search_articles(
         else:
             lexical_score = _relevance_score(row, terms)
             bm25_score = bm25_scores.get(row["id"], 0.0)
-            vector_score = vector_scores.get(row["id"], 0.0)
-            score = lexical_score + (bm25_score * 1.35) + vector_score
+            score = lexical_score + (bm25_score * 1.35)
             if score <= 0:
                 continue
             row["score"] = score
@@ -329,6 +357,36 @@ def search_articles(
     else:
         matched_rows.sort(key=lambda item: (item["score"], item["publish_date"]), reverse=True)
         matched_rows = _rerank_rows(query, matched_rows)
+
+    if mode != "exact" and matched_rows:
+        candidate_limit = min(max(safe_page * safe_page_size * 3, 24), 72)
+        candidate_rows = matched_rows[:candidate_limit]
+        candidate_ids = [int(row["id"]) for row in candidate_rows]
+        source_limit = min(len(candidate_ids), safe_page * safe_page_size + safe_page_size)
+        try:
+            sync_articles_for_rag(candidate_ids[: min(len(candidate_ids), 36)], trigger_source="public_search")
+            retrieval = retrieve_scope_context(
+                query,
+                scope=RetrievalScope(scope_type="global_public", article_ids=candidate_ids),
+                page_size=max(source_limit, safe_page_size),
+                source_limit=source_limit,
+                language=language,
+            )
+            if retrieval["sources"]:
+                total = int(retrieval.get("total_sources") or len(retrieval["sources"]))
+                start = (safe_page - 1) * safe_page_size
+                items = retrieval["sources"][start : start + safe_page_size]
+                return {
+                    "query": query,
+                    "mode": mode,
+                    "total": total,
+                    "page": safe_page,
+                    "page_size": safe_page_size,
+                    "query_terms": terms,
+                    "items": items,
+                }
+        except Exception:
+            pass
 
     total = len(matched_rows)
     start = (safe_page - 1) * safe_page_size

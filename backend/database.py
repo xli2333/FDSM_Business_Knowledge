@@ -111,6 +111,22 @@ def ensure_runtime_tables() -> None:
                 summary_model TEXT,
                 summary_updated_at TEXT,
                 manual_summary_html_backup TEXT,
+                translation_title_en TEXT,
+                translation_excerpt_en TEXT,
+                translation_summary_en TEXT,
+                summary_html_en TEXT,
+                published_summary_html_en TEXT,
+                translation_summary_editor_document_json TEXT NOT NULL DEFAULT '{}',
+                translation_content_en TEXT,
+                final_html_en TEXT,
+                published_final_html_en TEXT,
+                translation_editor_document_json TEXT NOT NULL DEFAULT '{}',
+                html_web_en TEXT,
+                html_wechat_en TEXT,
+                translation_status TEXT NOT NULL DEFAULT 'pending',
+                translation_error TEXT,
+                translation_model TEXT,
+                translation_updated_at TEXT,
                 tag_suggestion_payload_json TEXT NOT NULL DEFAULT '[]',
                 tag_payload_json TEXT NOT NULL DEFAULT '[]',
                 removed_tag_payload_json TEXT NOT NULL DEFAULT '[]',
@@ -208,6 +224,192 @@ def ensure_runtime_tables() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_user_follows_user
             ON user_follows(user_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS user_knowledge_themes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                title TEXT NOT NULL,
+                description TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, slug)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_user_knowledge_themes_user
+            ON user_knowledge_themes(user_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS user_knowledge_theme_articles (
+                theme_id INTEGER NOT NULL REFERENCES user_knowledge_themes(id),
+                article_id INTEGER NOT NULL REFERENCES articles(id),
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (theme_id, article_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_user_knowledge_theme_articles_article
+            ON user_knowledge_theme_articles(article_id, theme_id);
+
+            CREATE TABLE IF NOT EXISTS article_versions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                article_id INTEGER NOT NULL REFERENCES articles(id),
+                source_hash TEXT NOT NULL,
+                title TEXT NOT NULL,
+                excerpt TEXT,
+                main_topic TEXT,
+                access_level TEXT NOT NULL DEFAULT 'public',
+                status TEXT NOT NULL DEFAULT 'pending',
+                is_current INTEGER NOT NULL DEFAULT 1,
+                word_count INTEGER NOT NULL DEFAULT 0,
+                chunk_count INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                ingested_at TEXT,
+                UNIQUE(article_id, source_hash)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_article_versions_article
+            ON article_versions(article_id, is_current, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS article_chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                article_id INTEGER NOT NULL REFERENCES articles(id),
+                version_id INTEGER NOT NULL REFERENCES article_versions(id),
+                chunk_index INTEGER NOT NULL,
+                chunk_hash TEXT NOT NULL,
+                heading TEXT,
+                content TEXT NOT NULL,
+                search_text TEXT NOT NULL,
+                token_count INTEGER NOT NULL DEFAULT 0,
+                char_count INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(version_id, chunk_index),
+                UNIQUE(version_id, chunk_hash)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_article_chunks_version
+            ON article_chunks(version_id, chunk_index ASC);
+
+            CREATE INDEX IF NOT EXISTS idx_article_chunks_article
+            ON article_chunks(article_id, version_id, chunk_index ASC);
+
+            CREATE TABLE IF NOT EXISTS article_chunk_embeddings (
+                chunk_id INTEGER PRIMARY KEY REFERENCES article_chunks(id),
+                article_id INTEGER NOT NULL REFERENCES articles(id),
+                version_id INTEGER NOT NULL REFERENCES article_versions(id),
+                provider TEXT NOT NULL,
+                dimensions INTEGER NOT NULL DEFAULT 0,
+                embedding_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_article_chunk_embeddings_version
+            ON article_chunk_embeddings(version_id, article_id, chunk_id);
+
+            CREATE TABLE IF NOT EXISTS ingestion_jobs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                article_id INTEGER NOT NULL REFERENCES articles(id),
+                version_id INTEGER REFERENCES article_versions(id),
+                trigger_source TEXT NOT NULL DEFAULT 'manual',
+                status TEXT NOT NULL DEFAULT 'pending',
+                stage TEXT NOT NULL DEFAULT 'queued',
+                error_message TEXT,
+                metrics_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                completed_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_status
+            ON ingestion_jobs(status, updated_at DESC, id DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_ingestion_jobs_article
+            ON ingestion_jobs(article_id, created_at DESC, id DESC);
+
+            CREATE TABLE IF NOT EXISTS user_saved_articles (
+                user_id TEXT NOT NULL,
+                article_id INTEGER NOT NULL REFERENCES articles(id),
+                saved_via TEXT NOT NULL DEFAULT 'bookmark',
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, article_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_user_saved_articles_user
+            ON user_saved_articles(user_id, is_active, updated_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_user_saved_articles_article
+            ON user_saved_articles(article_id, is_active, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS user_library_profiles (
+                user_id TEXT PRIMARY KEY,
+                saved_count INTEGER NOT NULL DEFAULT 0,
+                latest_saved_at TEXT,
+                summary_text TEXT,
+                profile_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS user_theme_profiles (
+                theme_id INTEGER PRIMARY KEY REFERENCES user_knowledge_themes(id),
+                user_id TEXT NOT NULL,
+                article_count INTEGER NOT NULL DEFAULT 0,
+                latest_publish_date TEXT,
+                summary_text TEXT,
+                profile_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_user_theme_profiles_user
+            ON user_theme_profiles(user_id, updated_at DESC, theme_id DESC);
+
+            CREATE TABLE IF NOT EXISTS retrieval_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                scope_type TEXT NOT NULL,
+                scope_ref TEXT,
+                query TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                selected_article_count INTEGER NOT NULL DEFAULT 0,
+                returned_chunk_count INTEGER NOT NULL DEFAULT 0,
+                returned_article_count INTEGER NOT NULL DEFAULT 0,
+                latency_ms INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_retrieval_events_scope
+            ON retrieval_events(scope_type, created_at DESC, id DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_retrieval_events_user
+            ON retrieval_events(user_id, created_at DESC, id DESC);
+
+            CREATE TABLE IF NOT EXISTS answer_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT,
+                scope_type TEXT NOT NULL,
+                scope_ref TEXT,
+                question TEXT NOT NULL,
+                answer_model TEXT,
+                selected_article_count INTEGER NOT NULL DEFAULT 0,
+                source_article_count INTEGER NOT NULL DEFAULT 0,
+                source_chunk_count INTEGER NOT NULL DEFAULT 0,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_answer_events_scope
+            ON answer_events(scope_type, created_at DESC, id DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_answer_events_user
+            ON answer_events(user_id, created_at DESC, id DESC);
 
             CREATE TABLE IF NOT EXISTS user_memberships (
                 user_id TEXT PRIMARY KEY,
@@ -536,6 +738,42 @@ def ensure_runtime_tables() -> None:
             connection.execute("ALTER TABLE editorial_articles ADD COLUMN summary_updated_at TEXT")
         if not _table_has_column(connection, "editorial_articles", "manual_summary_html_backup"):
             connection.execute("ALTER TABLE editorial_articles ADD COLUMN manual_summary_html_backup TEXT")
+        if not _table_has_column(connection, "editorial_articles", "translation_title_en"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN translation_title_en TEXT")
+        if not _table_has_column(connection, "editorial_articles", "translation_excerpt_en"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN translation_excerpt_en TEXT")
+        if not _table_has_column(connection, "editorial_articles", "translation_summary_en"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN translation_summary_en TEXT")
+        if not _table_has_column(connection, "editorial_articles", "summary_html_en"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN summary_html_en TEXT")
+        if not _table_has_column(connection, "editorial_articles", "published_summary_html_en"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN published_summary_html_en TEXT")
+        if not _table_has_column(connection, "editorial_articles", "translation_summary_editor_document_json"):
+            connection.execute(
+                "ALTER TABLE editorial_articles ADD COLUMN translation_summary_editor_document_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if not _table_has_column(connection, "editorial_articles", "translation_content_en"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN translation_content_en TEXT")
+        if not _table_has_column(connection, "editorial_articles", "final_html_en"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN final_html_en TEXT")
+        if not _table_has_column(connection, "editorial_articles", "published_final_html_en"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN published_final_html_en TEXT")
+        if not _table_has_column(connection, "editorial_articles", "translation_editor_document_json"):
+            connection.execute(
+                "ALTER TABLE editorial_articles ADD COLUMN translation_editor_document_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        if not _table_has_column(connection, "editorial_articles", "html_web_en"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN html_web_en TEXT")
+        if not _table_has_column(connection, "editorial_articles", "html_wechat_en"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN html_wechat_en TEXT")
+        if not _table_has_column(connection, "editorial_articles", "translation_status"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN translation_status TEXT NOT NULL DEFAULT 'pending'")
+        if not _table_has_column(connection, "editorial_articles", "translation_error"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN translation_error TEXT")
+        if not _table_has_column(connection, "editorial_articles", "translation_model"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN translation_model TEXT")
+        if not _table_has_column(connection, "editorial_articles", "translation_updated_at"):
+            connection.execute("ALTER TABLE editorial_articles ADD COLUMN translation_updated_at TEXT")
         if not _table_has_column(connection, "editorial_articles", "formatting_notes"):
             connection.execute("ALTER TABLE editorial_articles ADD COLUMN formatting_notes TEXT")
         if not _table_has_column(connection, "editorial_articles", "formatter_model"):
@@ -724,6 +962,13 @@ def ensure_runtime_tables() -> None:
         connection.execute(
             """
             UPDATE editorial_articles
+            SET translation_summary_editor_document_json = COALESCE(NULLIF(translation_summary_editor_document_json, ''), '{}')
+            WHERE translation_summary_editor_document_json IS NULL OR translation_summary_editor_document_json = ''
+            """
+        )
+        connection.execute(
+            """
+            UPDATE editorial_articles
             SET published_summary_html = COALESCE(published_summary_html, summary_html)
             WHERE status = 'published'
               AND (published_summary_html IS NULL OR published_summary_html = '')
@@ -733,11 +978,21 @@ def ensure_runtime_tables() -> None:
         connection.execute(
             """
             UPDATE editorial_articles
+            SET published_summary_html_en = COALESCE(published_summary_html_en, summary_html_en)
+            WHERE status = 'published'
+              AND (published_summary_html_en IS NULL OR published_summary_html_en = '')
+              AND COALESCE(NULLIF(summary_html_en, ''), '') != ''
+            """
+        )
+        connection.execute(
+            """
+            UPDATE editorial_articles
             SET workflow_status = CASE
-                WHEN status = 'published' THEN 'published'
+                WHEN status = 'published'
+                     AND COALESCE(NULLIF(draft_box_state, ''), 'archived') = 'archived' THEN 'published'
                 ELSE COALESCE(NULLIF(workflow_status, ''), 'draft')
             END
-            WHERE workflow_status IS NULL OR workflow_status = '' OR status = 'published'
+            WHERE workflow_status IS NULL OR workflow_status = ''
             """
         )
         connection.execute(
@@ -745,6 +1000,22 @@ def ensure_runtime_tables() -> None:
             UPDATE editorial_articles
             SET draft_box_state = 'active'
             WHERE draft_box_state IS NULL OR draft_box_state = ''
+            """
+        )
+        connection.execute(
+            """
+            UPDATE editorial_articles
+            SET translation_editor_document_json = COALESCE(NULLIF(translation_editor_document_json, ''), '{}')
+            WHERE translation_editor_document_json IS NULL OR translation_editor_document_json = ''
+            """
+        )
+        connection.execute(
+            """
+            UPDATE editorial_articles
+            SET published_final_html_en = COALESCE(published_final_html_en, final_html_en, html_web_en, html_wechat_en)
+            WHERE status = 'published'
+              AND (published_final_html_en IS NULL OR published_final_html_en = '')
+              AND COALESCE(NULLIF(final_html_en, ''), NULLIF(html_web_en, ''), NULLIF(html_wechat_en, '')) IS NOT NULL
             """
         )
         connection.execute(
@@ -761,6 +1032,40 @@ def ensure_runtime_tables() -> None:
             WHERE status = 'published'
               AND COALESCE(NULLIF(workflow_status, ''), 'published') = 'published'
             """
+        )
+        timestamp = datetime.now().replace(microsecond=0).isoformat()
+        connection.execute(
+            """
+            INSERT INTO user_saved_articles (
+                user_id,
+                article_id,
+                saved_via,
+                is_active,
+                created_at,
+                updated_at
+            )
+            SELECT
+                ar.user_id,
+                ar.article_id,
+                'bookmark',
+                ar.is_active,
+                COALESCE(ar.created_at, ?),
+                COALESCE(ar.updated_at, COALESCE(ar.created_at, ?))
+            FROM article_reactions ar
+            WHERE ar.reaction_type = 'bookmark'
+            ON CONFLICT(user_id, article_id) DO UPDATE SET
+                saved_via = excluded.saved_via,
+                is_active = excluded.is_active,
+                created_at = CASE
+                    WHEN user_saved_articles.created_at <= excluded.created_at THEN user_saved_articles.created_at
+                    ELSE excluded.created_at
+                END,
+                updated_at = CASE
+                    WHEN user_saved_articles.updated_at >= excluded.updated_at THEN user_saved_articles.updated_at
+                    ELSE excluded.updated_at
+                END
+            """,
+            (timestamp, timestamp),
         )
         timestamp = datetime.now().replace(microsecond=0).isoformat()
         home_slot_count = connection.execute("SELECT COUNT(*) AS total FROM home_content_slots").fetchone()["total"]

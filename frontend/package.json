@@ -15,7 +15,14 @@
     "content-ops:acceptance:round99": "node scripts/content_ops_acceptance_round99.mjs",
     "editorial:acceptance:round101": "node scripts/editorial_acceptance_round101.mjs",
     "media:acceptance:round106": "node scripts/media_acceptance_round106.mjs",
-    "cover:acceptance:round109": "node scripts/cover_acceptance_round109.mjs"
+    "cover:acceptance:round109": "node scripts/cover_acceptance_round109.mjs",
+    "knowledge:acceptance:round125": "node scripts/knowledge_acceptance_round125.mjs",
+    "member-assets:acceptance:round126": "node scripts/member_asset_acceptance_round126.mjs",
+    "rag:acceptance:round139": "node scripts/rag_acceptance_round139.mjs",
+    "markdown:acceptance:round140": "node scripts/chat_markdown_acceptance_round140.mjs",
+    "knowledge-ui:acceptance:round141": "node scripts/knowledge_ui_acceptance_round141.mjs",
+    "knowledge-ui:acceptance:round142": "node scripts/knowledge_ui_acceptance_round142.mjs",
+    "knowledge-ui:acceptance:round143": "node scripts/knowledge_ui_acceptance_round143.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
@@ -34,6 +41,7 @@
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.0.0",
+    "remark-gfm": "^4.0.1",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {

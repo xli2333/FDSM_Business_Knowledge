@@ -402,6 +402,8 @@ class UserAssetSummary(BaseModel):
     like_count: int = 0
     recent_view_count: int = 0
     follow_count: int = 0
+    knowledge_theme_count: int = 0
+    knowledge_article_count: int = 0
     accessible_media_count: int = 0
     unlocked_access_level: str = "public"
 
@@ -499,6 +501,11 @@ class MediaItemDetail(MediaItemSummary):
     published_media_url: str | None = None
     published_cover_image_url: str | None = None
     published_chapters: list[MediaChapter] = Field(default_factory=list)
+
+
+class MediaPublicDetail(MediaItemSummary):
+    body_markdown: str = ""
+    chapters: list[MediaChapter] = Field(default_factory=list)
 
 
 class MediaItemCreate(BaseModel):
@@ -708,6 +715,84 @@ class UserLibraryResponse(BaseModel):
     bookmarks: list[ArticleCard] = Field(default_factory=list)
     likes: list[ArticleCard] = Field(default_factory=list)
     recent_views: list[ArticleCard] = Field(default_factory=list)
+    saved_count: int = 0
+    latest_saved_at: str | None = None
+    profile_summary: str | None = None
+    top_topics: list[str] = Field(default_factory=list)
+    top_tags: list[str] = Field(default_factory=list)
+
+
+class UserLibraryChatRequest(BaseModel):
+    messages: list[ChatMessageIn]
+    language: str = "zh"
+    selected_article_ids: list[int] | None = None
+
+
+class UserLibraryChatResponse(BaseModel):
+    answer: str
+    sources: list[ArticleCard] = Field(default_factory=list)
+    follow_up_questions: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
+
+
+class UserKnowledgeThemeSummary(BaseModel):
+    id: int
+    title: str
+    slug: str
+    description: str | None = None
+    article_count: int = 0
+    contains_article: bool = False
+    created_at: str
+    updated_at: str
+    latest_publish_date: str | None = None
+    preview_articles: list[ArticleCard] = Field(default_factory=list)
+
+
+class UserKnowledgeThemeDetail(UserKnowledgeThemeSummary):
+    total: int = 0
+    page: int = 1
+    page_size: int = 24
+    articles: list[ArticleCard] = Field(default_factory=list)
+
+
+class UserKnowledgeThemeCreateRequest(BaseModel):
+    title: str
+    description: str | None = None
+    initial_article_id: int | None = None
+
+
+class UserKnowledgeThemeUpdateRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+
+
+class UserKnowledgeThemeArticleRequest(BaseModel):
+    article_id: int
+
+
+class UserKnowledgeThemeArticleResponse(BaseModel):
+    theme_id: int
+    article_id: int
+    active: bool = True
+    article_count: int = 0
+
+
+class UserKnowledgeThemeListResponse(BaseModel):
+    items: list[UserKnowledgeThemeSummary] = Field(default_factory=list)
+    total: int = 0
+
+
+class UserKnowledgeThemeChatRequest(BaseModel):
+    messages: list[ChatMessageIn]
+    language: str = "zh"
+    selected_article_ids: list[int] | None = None
+
+
+class UserKnowledgeThemeChatResponse(BaseModel):
+    answer: str
+    sources: list[ArticleCard] = Field(default_factory=list)
+    follow_up_questions: list[str] = Field(default_factory=list)
+    confidence: float = 0.0
 
 
 class UserDashboardResponse(BaseModel):
@@ -766,6 +851,79 @@ class AdminOverviewResponse(BaseModel):
     role_counts: list[MembershipTierCount] = Field(default_factory=list)
     recent_users: list[BusinessUserProfile] = Field(default_factory=list)
     recent_audits: list[AdminAuditLogItem] = Field(default_factory=list)
+
+
+class RagAdminAssetItem(BaseModel):
+    article_id: int
+    slug: str
+    title: str
+    publish_date: str
+    access_level: str = "public"
+    version_id: int | None = None
+    version_status: str | None = None
+    chunk_count: int = 0
+    embedding_count: int = 0
+    embedding_provider: str | None = None
+    version_updated_at: str
+    ingested_at: str | None = None
+    latest_job_status: str | None = None
+    latest_job_stage: str | None = None
+    latest_job_updated_at: str | None = None
+    latest_job_completed_at: str | None = None
+    latest_job_error: str | None = None
+
+
+class RagAdminJobItem(BaseModel):
+    id: int
+    article_id: int
+    version_id: int | None = None
+    slug: str
+    title: str
+    publish_date: str
+    trigger_source: str
+    status: str
+    stage: str
+    chunk_count: int = 0
+    embedding_count: int = 0
+    error_message: str | None = None
+    created_at: str
+    updated_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+class RagAdminRetrievalEvent(BaseModel):
+    created_at: str
+    scope_type: str
+    query: str
+    provider: str
+    returned_chunk_count: int = 0
+    returned_article_count: int = 0
+    latency_ms: int = 0
+
+
+class RagAdminAnswerEvent(BaseModel):
+    created_at: str
+    scope_type: str
+    question: str
+    answer_model: str | None = None
+    source_article_count: int = 0
+    source_chunk_count: int = 0
+
+
+class RagAdminOverviewResponse(BaseModel):
+    current_version_count: int = 0
+    ready_article_count: int = 0
+    processing_article_count: int = 0
+    total_chunk_count: int = 0
+    total_embedding_count: int = 0
+    pending_job_count: int = 0
+    failed_job_count: int = 0
+    latest_processed_at: str | None = None
+    latest_assets: list[RagAdminAssetItem] = Field(default_factory=list)
+    latest_jobs: list[RagAdminJobItem] = Field(default_factory=list)
+    recent_retrievals: list[RagAdminRetrievalEvent] = Field(default_factory=list)
+    recent_answers: list[RagAdminAnswerEvent] = Field(default_factory=list)
 
 
 class AdminContentEntity(BaseModel):
@@ -828,6 +986,46 @@ class EditorialRenderSnapshot(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class EditorialRagVersionStatus(BaseModel):
+    id: int
+    article_id: int
+    source_hash: str
+    status: str
+    chunk_count: int = 0
+    is_current: bool = False
+    updated_at: str
+    ingested_at: str | None = None
+
+
+class EditorialRagJobStatus(BaseModel):
+    id: int
+    article_id: int
+    version_id: int | None = None
+    trigger_source: str
+    status: str
+    stage: str
+    error_message: str | None = None
+    created_at: str
+    updated_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+class EditorialRagStatus(BaseModel):
+    article_id: int | None = None
+    version_exists: bool = False
+    in_knowledge_base: bool = False
+    current_version_status: str | None = None
+    current_version: EditorialRagVersionStatus | None = None
+    chunk_count: int = 0
+    embedding_count: int = 0
+    has_embeddings: bool = False
+    embedding_dimensions: int = 0
+    embedding_provider: str | None = None
+    latest_job: EditorialRagJobStatus | None = None
+    last_error_message: str | None = None
+
+
 class EditorialWorkflowCount(BaseModel):
     workflow_status: str
     workflow_label: str
@@ -862,6 +1060,14 @@ class EditorialArticleCreate(EditorialArticleBase):
     editor_document: dict[str, Any] | None = None
     summary_html: str | None = None
     final_html: str | None = None
+    translation_title_en: str | None = None
+    translation_excerpt_en: str | None = None
+    translation_summary_en: str | None = None
+    summary_html_en: str | None = None
+    translation_summary_editor_document: dict[str, Any] | None = None
+    translation_content_en: str | None = None
+    final_html_en: str | None = None
+    translation_editor_document: dict[str, Any] | None = None
 
 
 class EditorialArticleUpdate(BaseModel):
@@ -889,6 +1095,14 @@ class EditorialArticleUpdate(BaseModel):
     editor_document: dict[str, Any] | None = None
     summary_html: str | None = None
     final_html: str | None = None
+    translation_title_en: str | None = None
+    translation_excerpt_en: str | None = None
+    translation_summary_en: str | None = None
+    summary_html_en: str | None = None
+    translation_summary_editor_document: dict[str, Any] | None = None
+    translation_content_en: str | None = None
+    final_html_en: str | None = None
+    translation_editor_document: dict[str, Any] | None = None
 
 
 class EditorialWorkflowRequest(BaseModel):
@@ -960,8 +1174,15 @@ class EditorialArticleDetail(EditorialArticleSummary):
     summary_has_unpublished_changes: bool = False
     manual_summary_html_backup: str | None = None
     has_summary_backup: bool = False
+    translation_title_en: str | None = None
+    translation_excerpt_en: str | None = None
+    translation_summary_en: str | None = None
+    summary_html_en: str | None = None
+    published_summary_html_en: str | None = None
+    translation_summary_editor_document: dict[str, Any] = Field(default_factory=dict)
     content_markdown: str
     plain_text_content: str
+    translation_content_en: str | None = None
     final_html: str | None = None
     published_final_html: str | None = None
     html_web: str | None = None
@@ -972,6 +1193,17 @@ class EditorialArticleDetail(EditorialArticleSummary):
     is_manual_edit: bool = False
     manual_final_html_backup: str | None = None
     has_manual_backup: bool = False
+    final_html_en: str | None = None
+    published_final_html_en: str | None = None
+    html_web_en: str | None = None
+    html_wechat_en: str | None = None
+    translation_editor_document: dict[str, Any] = Field(default_factory=dict)
+    translation_status: str = "pending"
+    translation_error: str | None = None
+    translation_model: str | None = None
+    translation_updated_at: str | None = None
+    translation_ready: bool = False
+    translation_has_unpublished_changes: bool = False
     render_metadata: EditorialRenderSnapshot = Field(default_factory=EditorialRenderSnapshot)
     selected_topics: list[AdminContentEntity] = Field(default_factory=list)
     selected_topic_ids: list[int] = Field(default_factory=list)
@@ -979,6 +1211,7 @@ class EditorialArticleDetail(EditorialArticleSummary):
     created_at: str
     published_at: str | None = None
     source_article_ai: EditorialAiOutputDetail | None = None
+    rag_status: EditorialRagStatus = Field(default_factory=EditorialRagStatus)
 
 
 class EditorialHtmlResponse(BaseModel):

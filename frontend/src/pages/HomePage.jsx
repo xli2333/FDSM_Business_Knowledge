@@ -125,19 +125,38 @@ function HomePage() {
         ? ['Membership', 'Unlock AI Assistant', 'Sign in and move into paid membership to use the assistant inside the product.', isAuthenticated ? '/membership' : '/login']
         : ['会员', '解锁 AI 助理', '登录后进入会员体系，再升级到付费会员即可使用 AI 助理。', isAuthenticated ? '/membership' : '/login']
 
+  const canUseKnowledgeSystem = Boolean(membership?.can_access_paid) || Boolean(membership?.is_admin)
+  const knowledgeSystemCard = isEnglish
+    ? [
+        'Knowledge',
+        'Knowledge System',
+        canUseKnowledgeSystem
+          ? 'File saved articles into themes and keep asking, comparing, and synthesizing inside your own knowledge system.'
+          : 'Sign in and upgrade to organize saved articles into themes inside your own knowledge system.',
+        canUseKnowledgeSystem ? '/me/knowledge' : isAuthenticated ? '/membership' : '/login',
+      ]
+    : [
+        '知识库',
+        '知识库系统',
+        canUseKnowledgeSystem
+          ? '把收藏文章整理成主题，在你的知识库系统里持续提问、比较和整合。'
+          : '登录并升级后，把收藏文章整理成主题，进入你的知识库系统持续分析。',
+        canUseKnowledgeSystem ? '/me/knowledge' : isAuthenticated ? '/membership' : '/login',
+      ]
+
   const experienceCards = isEnglish
     ? [
         ['Search', 'Unified Search', 'Search the business article library by topic, person, or concept.', `/search?q=AI&mode=${defaultSearchMode}`],
         assistantCard,
         topicAccessCard,
-        ['Archive', 'Time Machine', 'Jump across dates and revisit historical content through the archive.', '/time-machine'],
+        knowledgeSystemCard,
         ['Membership', 'Membership Access', 'Articles and audio support public, member, and paid visibility.', '/membership'],
       ]
     : [
         ['搜索', '统一搜索', '从主题、人物和概念切入，快速找到商业文章内容。', `/search?q=AI&mode=${defaultSearchMode}`],
         assistantCard,
         topicAccessCard,
-        ['归档', '时光机', '按日期回看历史内容，从档案里重新进入文章。', '/time-machine'],
+        knowledgeSystemCard,
         ['会员', '会员访问', '文章和音频已经支持公开、会员和付费可见性。', '/membership'],
       ]
 
@@ -293,12 +312,16 @@ function HomePage() {
       <section className="page-shell pt-12 md:pt-16">
         <div className={`grid items-start gap-8 ${isEnglish ? 'lg:grid-cols-[1fr_1fr] xl:grid-cols-[1.06fr_0.94fr]' : 'lg:grid-cols-[1.2fr_0.8fr]'}`}>
           <div className="space-y-8">
-            <div className="space-y-5">
-              <div className="section-kicker">Business-only Knowledge Base</div>
+            <div className="space-y-4">
+              <div className="inline-flex -translate-y-1 items-center text-[0.78rem] font-semibold uppercase tracking-[0.3em] text-fudan-orange md:-translate-y-2">
+                Fudan Business Knowledge
+              </div>
               <h1
                 className={[
                   'font-serif font-black text-fudan-blue',
-                  isEnglish ? 'text-[3.05rem] leading-[0.95] tracking-[-0.03em] md:text-[3.55rem] xl:text-[4.05rem] 2xl:text-[4.45rem]' : 'text-5xl leading-tight md:text-7xl',
+                  isEnglish
+                    ? 'text-[3.05rem] leading-[0.95] tracking-[-0.03em] md:text-[3.55rem] xl:text-[4.05rem] 2xl:text-[4.45rem]'
+                    : 'text-[4.4rem] leading-[0.95] tracking-[-0.03em] md:text-[6.2rem] xl:text-[6.8rem]',
                 ].join(' ')}
               >
                 {isEnglish ? (

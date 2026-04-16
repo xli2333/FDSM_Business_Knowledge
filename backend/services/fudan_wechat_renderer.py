@@ -11,6 +11,9 @@ from backend.config import GEMINI_API_KEYS, PRIMARY_GEMINI_KEY
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 BRIDGE_SCRIPT_PATH = PROJECT_ROOT / "backend" / "scripts" / "wechat_fudan_bridge.mjs"
+WECHAT_RUNTIME_ROOT = PROJECT_ROOT / "backend" / "wechat_runtime"
+WECHAT_RUNTIME_SERVICE_PATH = WECHAT_RUNTIME_ROOT / "wechatOfficialPublisherService.mjs"
+WECHAT_RUNTIME_PACKAGE_PATH = WECHAT_RUNTIME_ROOT / "package.json"
 _GEMINI_KEY_COUNTER = itertools.count()
 
 
@@ -46,6 +49,19 @@ def _clip_message(value: str, limit: int = 600) -> str:
     return f"{text[:limit].rstrip()}..."
 
 
+def _assert_bundled_wechat_runtime_available() -> None:
+    if not BRIDGE_SCRIPT_PATH.exists():
+        raise FudanWechatRenderError(f"Bundled WeChat bridge is missing: {BRIDGE_SCRIPT_PATH}")
+    if not WECHAT_RUNTIME_SERVICE_PATH.exists():
+        raise FudanWechatRenderError(
+            f"Bundled WeChat runtime is missing: {WECHAT_RUNTIME_SERVICE_PATH}"
+        )
+    if not WECHAT_RUNTIME_PACKAGE_PATH.exists():
+        raise FudanWechatRenderError(
+            f"Bundled WeChat runtime package metadata is missing: {WECHAT_RUNTIME_PACKAGE_PATH}"
+        )
+
+
 def render_fudan_wechat_batch(
     items: list[dict[str, Any]],
     *,
@@ -53,6 +69,7 @@ def render_fudan_wechat_batch(
 ) -> list[dict[str, Any]]:
     if not items:
         return []
+    _assert_bundled_wechat_runtime_available()
 
     payload = {"items": items}
     try:

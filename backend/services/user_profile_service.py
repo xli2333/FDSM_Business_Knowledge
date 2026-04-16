@@ -629,6 +629,8 @@ def get_user_asset_summary(user_id: str | None, membership: dict | None) -> dict
             "like_count": 0,
             "recent_view_count": 0,
             "follow_count": 0,
+            "knowledge_theme_count": 0,
+            "knowledge_article_count": 0,
             "accessible_media_count": 0,
             "unlocked_access_level": "public",
         }
@@ -676,6 +678,23 @@ def get_user_asset_summary(user_id: str | None, membership: dict | None) -> dict
             """,
             (user_id,),
         ).fetchone()[0]
+        knowledge_theme_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM user_knowledge_themes
+            WHERE user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()[0]
+        knowledge_article_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM user_knowledge_theme_articles ukta
+            JOIN user_knowledge_themes ukt ON ukt.id = ukta.theme_id
+            WHERE ukt.user_id = ?
+            """,
+            (user_id,),
+        ).fetchone()[0]
         placeholders = ",".join("?" for _ in media_levels)
         accessible_media_count = connection.execute(
             f"""
@@ -692,6 +711,8 @@ def get_user_asset_summary(user_id: str | None, membership: dict | None) -> dict
         "like_count": int(like_count),
         "recent_view_count": int(recent_view_count),
         "follow_count": int(follow_count),
+        "knowledge_theme_count": int(knowledge_theme_count),
+        "knowledge_article_count": int(knowledge_article_count),
         "accessible_media_count": int(accessible_media_count),
         "unlocked_access_level": unlocked_access_level,
     }

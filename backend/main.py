@@ -28,6 +28,7 @@ from backend.routers.search import router as search_router
 from backend.routers.tags import router as tags_router
 from backend.routers.time_machine import router as time_machine_router
 from backend.routers.topics import router as topics_router
+from backend.routers.user_knowledge import router as user_knowledge_router
 
 from backend.database import ensure_runtime_tables
 from backend.services.media_service import sync_local_audio_library
@@ -61,6 +62,7 @@ app.include_router(follows_router)
 app.include_router(admin_router)
 app.include_router(analytics_router)
 app.include_router(me_router)
+app.include_router(user_knowledge_router)
 app.include_router(media_router)
 app.include_router(organizations_router)
 app.include_router(search_router)

@@ -45,3 +45,5 @@ _publish_clean/
 reports/*.log
 docs/project-manual/14-API接口文档.md
 frontend/src/api.js
+backend/tests/_tmp_editorial_uploads/
+stock_portfolio/

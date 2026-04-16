@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import {
   autoFormatEditorialArticle,
   autoSummarizeEditorialArticle,
+  autoTranslateEditorialArticle,
   autotagEditorialArticle,
   createEditorialArticle,
   deleteEditorialArticle,
@@ -130,7 +131,15 @@ function getDraftStatusClass(article) {
   return 'border-amber-200 bg-amber-50 text-fudan-orange'
 }
 
-function buildPersistPayload(form, detail, isEnglish, editorState = null, summaryEditorState = null) {
+function buildPersistPayload(
+  form,
+  detail,
+  isEnglish,
+  editorState = null,
+  summaryEditorState = null,
+  translationEditorState = null,
+  translationSummaryEditorState = null,
+) {
   const sourceMarkdown = String(form.source_markdown || '').trim()
   const retainedTags = Array.isArray(form.tags) ? form.tags : []
   const payload = {
@@ -161,6 +170,18 @@ function buildPersistPayload(form, detail, isEnglish, editorState = null, summar
   if (editorState?.dirty && editorState?.html) {
     payload.final_html = editorState.html
     payload.editor_document = editorState.document || null
+  }
+
+  if (translationSummaryEditorState?.dirty && translationSummaryEditorState?.html) {
+    payload.summary_html_en = translationSummaryEditorState.html
+    payload.translation_summary_editor_document = translationSummaryEditorState.document || null
+    payload.translation_summary_en = String(translationSummaryEditorState.text || detail?.translation_summary_en || '').trim() || null
+  }
+
+  if (translationEditorState?.dirty && translationEditorState?.html) {
+    payload.final_html_en = translationEditorState.html
+    payload.translation_editor_document = translationEditorState.document || null
+    payload.translation_content_en = String(translationEditorState.text || detail?.translation_content_en || '').trim() || null
   }
 
   return payload
@@ -212,6 +233,7 @@ function EditorialWorkbenchPage() {
   const fileRef = useRef(null)
   const coverFileRef = useRef(null)
   const hasInitializedRef = useRef(false)
+  const selectedIdRef = useRef(null)
   const [searchParams, setSearchParams] = useSearchParams()
   const [articles, setArticles] = useState([])
   const [columns, setColumns] = useState(DEFAULT_COLUMNS)
@@ -224,6 +246,8 @@ function EditorialWorkbenchPage() {
   const [message, setMessage] = useState('')
   const [summaryEditorState, setSummaryEditorState] = useState(EMPTY_EDITOR_STATE)
   const [editorState, setEditorState] = useState(EMPTY_EDITOR_STATE)
+  const [translationSummaryEditorState, setTranslationSummaryEditorState] = useState(EMPTY_EDITOR_STATE)
+  const [translationEditorState, setTranslationEditorState] = useState(EMPTY_EDITOR_STATE)
   const [topicQuery, setTopicQuery] = useState('')
   const [topicResults, setTopicResults] = useState([])
   const sourceCount = useMemo(() => String(form.source_markdown || '').replace(/\s+/g, '').length, [form.source_markdown])
@@ -242,6 +266,8 @@ function EditorialWorkbenchPage() {
   const reopenedFromArticle = searchParams.get('reopened') === '1'
   const hasUnsavedSummaryEdits = Boolean(summaryEditorState?.dirty && String(summaryEditorState?.html || '').trim())
   const hasUnsavedManualEdits = Boolean(editorState?.dirty && String(editorState?.html || '').trim())
+  const hasUnsavedEnglishSummaryEdits = Boolean(translationSummaryEditorState?.dirty && String(translationSummaryEditorState?.html || '').trim())
+  const hasUnsavedEnglishManualEdits = Boolean(translationEditorState?.dirty && String(translationEditorState?.html || '').trim())
   const canDeleteSelectedDraft = canDeleteDraftEntry(detail)
   const coverUrl = resolveApiUrl(form.cover_image_url)
 
@@ -253,6 +279,10 @@ function EditorialWorkbenchPage() {
     return article
   }, [])
 
+  useEffect(() => {
+    selectedIdRef.current = selectedId
+  }, [selectedId])
+
   const clearEditorialEntryQuery = useCallback(() => {
     const next = new URLSearchParams(searchParams)
     next.delete('editorial_id')
@@ -262,18 +292,37 @@ function EditorialWorkbenchPage() {
 
   const refreshAll = useCallback(
     async (preferredId = null) => {
-      const [list, dash] = await Promise.all([fetchEditorialArticles(80), fetchEditorialDashboard(8)])
-      setArticles(list)
+      let nextList = []
+      const [list, dash] = await Promise.all([fetchEditorialArticles(80, '', '', 'active'), fetchEditorialDashboard(8)])
+      nextList = Array.isArray(list) ? list : []
+      setArticles(nextList)
       setDashboard(dash)
-      const candidateIds = [preferredId, requestedEditorialId, list[0]?.id].filter(Boolean)
-      const nextId = candidateIds.find((candidateId) => list.some((item) => item.id === candidateId)) || list[0]?.id || null
+      const candidateIds = [preferredId, selectedIdRef.current, requestedEditorialId].filter(Boolean)
+      const nextId = candidateIds.find((candidateId) => nextList.some((item) => item.id === candidateId)) || nextList[0]?.id || null
       if (nextId) {
         await syncDetail(nextId)
-      } else {
-        setSelectedId(null)
-        setDetail(null)
-        setForm(DEFAULT_FORM)
+        return
       }
+
+      if (candidateIds.length) {
+        try {
+          const requestedDetail = await fetchEditorialArticle(candidateIds[0])
+          if (requestedDetail?.draft_box_state === 'active' && !nextList.some((item) => item.id === requestedDetail.id)) {
+            nextList = [requestedDetail, ...nextList]
+            setArticles(nextList)
+          }
+          setSelectedId(requestedDetail.id)
+          setDetail(requestedDetail)
+          setForm(normalizeForm(requestedDetail))
+          return
+        } catch {
+          // Ignore stale query params or deleted drafts and fall back to the current active list.
+        }
+      }
+
+      setSelectedId(null)
+      setDetail(null)
+      setForm(DEFAULT_FORM)
     },
     [requestedEditorialId, syncDetail],
   )
@@ -295,6 +344,8 @@ function EditorialWorkbenchPage() {
     if (!detail) {
       setSummaryEditorState(EMPTY_EDITOR_STATE)
       setEditorState(EMPTY_EDITOR_STATE)
+      setTranslationSummaryEditorState(EMPTY_EDITOR_STATE)
+      setTranslationEditorState(EMPTY_EDITOR_STATE)
       return
     }
 
@@ -315,6 +366,24 @@ function EditorialWorkbenchPage() {
       dirty: false,
       version: `${detail.id}:${detail.updated_at || ''}:${detail.editor_updated_at || ''}:${seededHtml.length}`,
     })
+
+    const seededEnglishSummaryHtml = detail.summary_html_en || detail.published_summary_html_en || ''
+    setTranslationSummaryEditorState({
+      html: seededEnglishSummaryHtml,
+      document: detail.translation_summary_editor_document || null,
+      text: detail.translation_summary_en || '',
+      dirty: false,
+      version: `summary-en:${detail.id}:${detail.updated_at || ''}:${detail.translation_updated_at || ''}:${seededEnglishSummaryHtml.length}`,
+    })
+
+    const seededEnglishHtml = detail.final_html_en || detail.html_web_en || detail.html_wechat_en || ''
+    setTranslationEditorState({
+      html: seededEnglishHtml,
+      document: detail.translation_editor_document || null,
+      text: detail.translation_content_en || '',
+      dirty: false,
+      version: `en:${detail.id}:${detail.updated_at || ''}:${detail.translation_updated_at || ''}:${seededEnglishHtml.length}`,
+    })
   }, [
     detail?.summary_editor_document,
     detail?.summary_html,
@@ -328,6 +397,16 @@ function EditorialWorkbenchPage() {
     detail?.html_wechat,
     detail?.id,
     detail?.plain_text_content,
+    detail?.summary_html_en,
+    detail?.published_summary_html_en,
+    detail?.translation_summary_editor_document,
+    detail?.translation_summary_en,
+    detail?.translation_content_en,
+    detail?.translation_editor_document,
+    detail?.final_html_en,
+    detail?.html_web_en,
+    detail?.html_wechat_en,
+    detail?.translation_updated_at,
     detail?.updated_at,
   ])
 
@@ -342,9 +421,11 @@ function EditorialWorkbenchPage() {
       isEnglish,
       includeEditorState ? editorState : null,
       includeEditorState ? summaryEditorState : null,
+      includeEditorState ? translationEditorState : null,
+      includeEditorState ? translationSummaryEditorState : null,
     )
     return selectedId ? updateEditorialArticle(selectedId, payload) : createEditorialArticle(payload)
-  }, [detail, editorState, form, isEnglish, selectedId, summaryEditorState])
+  }, [detail, editorState, form, isEnglish, selectedId, summaryEditorState, translationEditorState, translationSummaryEditorState])
 
   const ensureDraftForCover = useCallback(async () => {
     const payload = buildPersistPayload(
@@ -353,6 +434,8 @@ function EditorialWorkbenchPage() {
       isEnglish,
       hasUnsavedManualEdits ? editorState : null,
       hasUnsavedSummaryEdits ? summaryEditorState : null,
+      hasUnsavedEnglishManualEdits ? translationEditorState : null,
+      hasUnsavedEnglishSummaryEdits ? translationSummaryEditorState : null,
     )
     if (!String(payload.source_markdown || '').trim() && !String(payload.content_markdown || '').trim()) {
       const placeholder = isEnglish ? 'Cover image placeholder.' : '配图占位稿。'
@@ -364,11 +447,15 @@ function EditorialWorkbenchPage() {
     detail,
     editorState,
     form,
+    hasUnsavedEnglishManualEdits,
+    hasUnsavedEnglishSummaryEdits,
     hasUnsavedManualEdits,
     hasUnsavedSummaryEdits,
     isEnglish,
     selectedId,
     summaryEditorState,
+    translationEditorState,
+    translationSummaryEditorState,
   ])
 
   const run = useCallback(
@@ -426,11 +513,13 @@ function EditorialWorkbenchPage() {
   const handleSaveDraft = useCallback(
     () =>
       run('save', async () => {
-        const saved = await persist(hasUnsavedManualEdits || hasUnsavedSummaryEdits)
+        const saved = await persist(
+          hasUnsavedManualEdits || hasUnsavedSummaryEdits || hasUnsavedEnglishManualEdits || hasUnsavedEnglishSummaryEdits,
+        )
         await refreshAll(saved.id)
         setMessage(isEnglish ? 'Draft saved.' : '草稿已保存。')
       }),
-    [hasUnsavedManualEdits, hasUnsavedSummaryEdits, isEnglish, persist, refreshAll, run],
+    [hasUnsavedEnglishManualEdits, hasUnsavedEnglishSummaryEdits, hasUnsavedManualEdits, hasUnsavedSummaryEdits, isEnglish, persist, refreshAll, run],
   )
 
   const previewStatus = useMemo(() => {
@@ -476,6 +565,116 @@ function EditorialWorkbenchPage() {
     }
     return isEnglish ? 'Generate an AI summary first, then refine it manually if needed' : '先生成 AI 摘要，再按需人工微调'
   }, [detail?.summary_html, detail?.summary_model, isEnglish, summaryEditorState.dirty])
+
+  const translationStatus = useMemo(() => {
+    if (!detail) return isEnglish ? 'English translation pending' : '等待生成英文稿'
+    if (detail.translation_status === 'running') {
+      return isEnglish ? 'English translation is running' : 'AI 英文翻译进行中'
+    }
+    if (detail.translation_status === 'failed') {
+      return detail.translation_error || (isEnglish ? 'English translation failed' : 'AI 英文翻译失败')
+    }
+    if (detail.translation_ready) {
+      return detail.translation_has_unpublished_changes
+        ? isEnglish
+          ? 'English version updated and waiting to be republished'
+          : '英文稿已更新，待重新发布'
+        : isEnglish
+          ? 'English version ready'
+          : '英文稿已就绪'
+    }
+    return isEnglish ? 'Generate the English version with Flash before publishing' : '发布前请先生成 Flash 英文版'
+  }, [detail, isEnglish])
+
+  const translationHelperLine = useMemo(() => {
+    if (translationEditorState.dirty || translationSummaryEditorState.dirty) {
+      return isEnglish ? 'Current English draft contains unsaved manual edits' : '当前英文稿包含人工修改，尚未保存'
+    }
+    if (detail?.translation_ready) {
+      return isEnglish
+        ? 'English summary and final draft were generated from the current Chinese editorial assets'
+        : '当前英文摘要和英文成品来自这版中文摘要与正文的 AI 翻译'
+    }
+    return isEnglish
+      ? 'Translate the latest Chinese summary and final body into English with Gemini Flash'
+      : '使用 Gemini Flash 把最新中文摘要与正文翻成英文，并接入英文发布链路'
+  }, [detail?.translation_ready, isEnglish, translationEditorState.dirty, translationSummaryEditorState.dirty])
+
+  const ragStatus = useMemo(
+    () =>
+      detail?.rag_status || {
+        article_id: null,
+        version_exists: false,
+        in_knowledge_base: false,
+        current_version_status: null,
+        current_version: null,
+        chunk_count: 0,
+        embedding_count: 0,
+        has_embeddings: false,
+        embedding_dimensions: 0,
+        embedding_provider: null,
+        latest_job: null,
+        last_error_message: null,
+      },
+    [detail?.rag_status],
+  )
+
+  const ragStatusTitle = useMemo(() => {
+    if (!detail?.article_id) {
+      return isEnglish ? 'Not in the knowledge base yet' : '尚未进入正式知识库'
+    }
+    if (ragStatus.latest_job?.status === 'failed') {
+      return isEnglish ? 'RAG ingestion failed' : 'RAG 入库失败'
+    }
+    if (ragStatus.in_knowledge_base && ragStatus.has_embeddings) {
+      return isEnglish ? 'Indexed and embedded' : '已切片并完成 embedding'
+    }
+    if (ragStatus.in_knowledge_base) {
+      return isEnglish ? 'Indexed without embeddings' : '已切片，未生成 embedding'
+    }
+    if (ragStatus.latest_job?.status === 'running' || ragStatus.latest_job?.status === 'pending') {
+      return isEnglish ? 'Ingestion in progress' : '正在入库中'
+    }
+    return isEnglish ? 'Waiting for first ingestion' : '等待首次入库'
+  }, [detail?.article_id, isEnglish, ragStatus.has_embeddings, ragStatus.in_knowledge_base, ragStatus.latest_job?.status])
+
+  const ragStatusDescription = useMemo(() => {
+    if (!detail?.article_id) {
+      return isEnglish
+        ? 'Publishing will create the public article and immediately trigger chunking and embeddings.'
+        : '文章发布后会创建正式文章，并立即触发切片和 embedding。'
+    }
+    if (ragStatus.latest_job?.status === 'failed') {
+      return ragStatus.last_error_message || (isEnglish ? 'The latest ingestion job failed.' : '最近一次入库任务失败。')
+    }
+    if (ragStatus.latest_job?.status === 'running') {
+      return isEnglish
+        ? `Current stage: ${ragStatus.latest_job?.stage || 'running'}.`
+        : `当前阶段：${ragStatus.latest_job?.stage || 'running'}。`
+    }
+    if (ragStatus.latest_job?.status === 'pending') {
+      return isEnglish ? 'The ingestion job is queued and waiting to run.' : '入库任务已排队，等待执行。'
+    }
+    if (ragStatus.in_knowledge_base && ragStatus.has_embeddings) {
+      return isEnglish
+        ? 'The public RAG can already retrieve this article by chunk and semantic embedding.'
+        : '公开 RAG 已经可以按 chunk 和语义 embedding 检索这篇文章。'
+    }
+    if (ragStatus.in_knowledge_base) {
+      return isEnglish
+        ? 'The article already has chunk data, but embeddings are still missing.'
+        : '当前文章已经完成切片，但 embedding 还没有就绪。'
+    }
+    return isEnglish ? 'The article exists, but the RAG pipeline has not completed yet.' : '正式文章已经存在，但 RAG 流水线尚未完成。'
+  }, [
+    detail?.article_id,
+    isEnglish,
+    ragStatus.has_embeddings,
+    ragStatus.in_knowledge_base,
+    ragStatus.last_error_message,
+    ragStatus.latest_job?.stage,
+    ragStatus.latest_job?.status,
+  ])
 
   const resetDraft = () => {
     clearEditorialEntryQuery()
@@ -830,7 +1029,9 @@ function EditorialWorkbenchPage() {
                 type="button"
                 onClick={() =>
                   run('format', async () => {
-                    const saved = await persist(hasUnsavedManualEdits || hasUnsavedSummaryEdits)
+                    const saved = await persist(
+                      hasUnsavedManualEdits || hasUnsavedSummaryEdits || hasUnsavedEnglishManualEdits || hasUnsavedEnglishSummaryEdits,
+                    )
                     const article = await autoFormatEditorialArticle(saved.id, {
                       source_markdown: form.source_markdown,
                       layout_mode: form.layout_mode,
@@ -849,7 +1050,9 @@ function EditorialWorkbenchPage() {
                 type="button"
                 onClick={() =>
                   run('summary', async () => {
-                    const saved = await persist(hasUnsavedManualEdits || hasUnsavedSummaryEdits)
+                    const saved = await persist(
+                      hasUnsavedManualEdits || hasUnsavedSummaryEdits || hasUnsavedEnglishManualEdits || hasUnsavedEnglishSummaryEdits,
+                    )
                     const article = await autoSummarizeEditorialArticle(saved.id)
                     await refreshAll(article.id)
                     setMessage(isEnglish ? 'AI summary generated.' : 'AI 摘要已生成。')
@@ -863,8 +1066,27 @@ function EditorialWorkbenchPage() {
               <button
                 type="button"
                 onClick={() =>
+                  run('translate', async () => {
+                    const saved = await persist(
+                      hasUnsavedManualEdits || hasUnsavedSummaryEdits || hasUnsavedEnglishManualEdits || hasUnsavedEnglishSummaryEdits,
+                    )
+                    const article = await autoTranslateEditorialArticle(saved.id)
+                    await refreshAll(article.id)
+                    setMessage(isEnglish ? 'English translation generated.' : 'AI 英文翻译已生成。')
+                  })
+                }
+                className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-5 py-3 text-sm font-semibold text-emerald-700"
+              >
+                {busy === 'translate' ? <LoaderCircle size={16} className="animate-spin" /> : <Sparkles size={16} />}
+                {isEnglish ? 'Translate to English' : 'AI 翻译英文版'}
+              </button>
+              <button
+                type="button"
+                onClick={() =>
                   run('autotag', async () => {
-                    const saved = await persist(hasUnsavedManualEdits || hasUnsavedSummaryEdits)
+                    const saved = await persist(
+                      hasUnsavedManualEdits || hasUnsavedSummaryEdits || hasUnsavedEnglishManualEdits || hasUnsavedEnglishSummaryEdits,
+                    )
                     const article = await autotagEditorialArticle(saved.id)
                     await refreshAll(article.id)
                     setMessage(isEnglish ? 'Tags refreshed.' : 'AI 标签建议已更新。')
@@ -879,11 +1101,11 @@ function EditorialWorkbenchPage() {
                 type="button"
                 onClick={() =>
                   run('publish', async () => {
-                    if (hasUnsavedManualEdits || hasUnsavedSummaryEdits) {
+                    if (hasUnsavedManualEdits || hasUnsavedSummaryEdits || hasUnsavedEnglishManualEdits || hasUnsavedEnglishSummaryEdits) {
                       throw new Error(
                         isEnglish
-                          ? 'Save the manual edits in the summary or final draft before publishing.'
-                          : '请先保存摘要区或最终稿区里的人工修改，再执行发布。',
+                          ? 'Save the manual edits in the Chinese or English drafts before publishing.'
+                          : '请先保存中文或英文成品区里的人工修改，再执行发布。',
                       )
                     }
                     const saved = await persist(false)
@@ -895,7 +1117,16 @@ function EditorialWorkbenchPage() {
                       throw new Error(issueText || (isEnglish ? 'Publish validation failed after saving the latest draft.' : '保存最新草稿后，发布前校验未通过。'))
                     }
                     const result = await publishEditorialArticle(saved.id)
-                    await refreshAll(null)
+                    const [nextList, nextDash, publishedDetail] = await Promise.all([
+                      fetchEditorialArticles(80, '', '', 'active'),
+                      fetchEditorialDashboard(8),
+                      fetchEditorialArticle(saved.id),
+                    ])
+                    setArticles(nextList)
+                    setDashboard(nextDash)
+                    setSelectedId(publishedDetail.id)
+                    setDetail(publishedDetail)
+                    setForm(normalizeForm(publishedDetail))
                     const topicTitles = Array.isArray(result?.selected_topics)
                       ? result.selected_topics.map((topic) => topic?.title).filter(Boolean)
                       : []
@@ -926,6 +1157,78 @@ function EditorialWorkbenchPage() {
                 </button>
               ) : null}
             </div>
+          </section>
+
+          <section className="fudan-panel p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <div className="section-kicker">{isEnglish ? 'RAG status' : 'RAG 入库状态'}</div>
+                <div className="mt-2 font-serif text-2xl font-black text-fudan-blue">{ragStatusTitle}</div>
+                <div className="mt-2 max-w-3xl text-sm leading-7 text-slate-500">{ragStatusDescription}</div>
+              </div>
+              {detail?.article_id ? (
+                <Link
+                  to={`/article/${detail.article_id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-fudan-blue transition hover:border-fudan-blue/30"
+                >
+                  {isEnglish ? 'Open live article' : '打开正式文章'}
+                </Link>
+              ) : null}
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-[1.1rem] border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">{isEnglish ? 'Public article' : '正式文章'}</div>
+                <div className="mt-3 font-serif text-2xl font-black text-fudan-blue">
+                  {detail?.article_id ? `#${detail.article_id}` : isEnglish ? 'Not published' : '未发布'}
+                </div>
+                <div className="mt-2 text-xs leading-6 text-slate-500">
+                  {detail?.article_id ? (isEnglish ? 'Already generated inside articles table.' : '已经进入正式 articles 表。') : isEnglish ? 'Publish first to start public RAG ingestion.' : '先发布，才会进入公开 RAG 流程。'}
+                </div>
+              </div>
+
+              <div className="rounded-[1.1rem] border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">{isEnglish ? 'Current version' : '当前版本'}</div>
+                <div className="mt-3 font-serif text-2xl font-black text-fudan-blue">
+                  {ragStatus.current_version?.id ? `#${ragStatus.current_version.id}` : '0'}
+                </div>
+                <div className="mt-2 text-xs leading-6 text-slate-500">
+                  {ragStatus.current_version_status || (isEnglish ? 'No version yet' : '尚无版本')}
+                </div>
+              </div>
+
+              <div className="rounded-[1.1rem] border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">{isEnglish ? 'Chunks / embeddings' : '切片 / Embedding'}</div>
+                <div className="mt-3 font-serif text-2xl font-black text-fudan-blue">
+                  {ragStatus.chunk_count} / {ragStatus.embedding_count}
+                </div>
+                <div className="mt-2 text-xs leading-6 text-slate-500">
+                  {ragStatus.embedding_dimensions
+                    ? `${ragStatus.embedding_dimensions}d · ${ragStatus.embedding_provider || 'embedding'}`
+                    : isEnglish
+                      ? 'No embedding vector yet'
+                      : '当前还没有 embedding 向量'}
+                </div>
+              </div>
+
+              <div className="rounded-[1.1rem] border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs uppercase tracking-[0.22em] text-slate-400">{isEnglish ? 'Latest job' : '最近任务'}</div>
+                <div className="mt-3 font-serif text-2xl font-black text-fudan-blue">
+                  {ragStatus.latest_job ? `#${ragStatus.latest_job.id}` : '0'}
+                </div>
+                <div className="mt-2 text-xs leading-6 text-slate-500">
+                  {ragStatus.latest_job ? `${ragStatus.latest_job.status} / ${ragStatus.latest_job.stage}` : isEnglish ? 'No ingestion job yet' : '当前还没有入库任务'}
+                </div>
+              </div>
+            </div>
+
+            {ragStatus.last_error_message ? (
+              <div className="mt-4 rounded-[1rem] border border-red-200 bg-red-50 px-4 py-3 text-sm leading-7 text-red-600">
+                {ragStatus.last_error_message}
+              </div>
+            ) : null}
           </section>
 
           <section className="grid gap-6 lg:grid-cols-[1.1fr_.9fr]">
@@ -1207,6 +1510,7 @@ function EditorialWorkbenchPage() {
                   previewPanelTitle={isEnglish ? 'Summary rendered preview' : '摘要最终呈现预览'}
                   editableFrameTitle="Editable editorial summary frame"
                   previewFrameTitle="Editorial summary preview frame"
+                  minFrameHeight={520}
                   onChange={(nextState) =>
                     setSummaryEditorState((current) => ({
                       ...current,
@@ -1290,6 +1594,114 @@ function EditorialWorkbenchPage() {
                   </div>
                 </div>
               ) : null}
+            </div>
+            <div className="fudan-panel overflow-hidden p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="section-kicker">{isEnglish ? 'English summary workspace' : '英文摘要工作区'}</div>
+                  <div className="mt-2 text-sm text-slate-500">{translationStatus}</div>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                  <button
+                    type="button"
+                    onClick={handleSaveDraft}
+                    className="inline-flex items-center gap-2 rounded-full border border-fudan-blue/15 bg-fudan-blue/10 px-4 py-2 font-semibold text-fudan-blue"
+                  >
+                    {busy === 'save' ? <LoaderCircle size={15} className="animate-spin" /> : <Save size={15} />}
+                    {isEnglish ? 'Save draft' : '保存'}
+                  </button>
+                  {detail?.translation_model ? <span>{detail.translation_model}</span> : null}
+                </div>
+              </div>
+              <div className="mt-5 grid gap-4 md:grid-cols-2">
+                <div className="rounded-[1.2rem] border border-slate-200/70 bg-slate-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-400">{isEnglish ? 'English title' : '英文标题'}</div>
+                  <div className="mt-3 text-base font-semibold text-fudan-blue">
+                    {detail?.translation_title_en || (isEnglish ? 'Not generated yet' : '尚未生成')}
+                  </div>
+                </div>
+                <div className="rounded-[1.2rem] border border-slate-200/70 bg-slate-50 p-4">
+                  <div className="text-xs uppercase tracking-[0.18em] text-slate-400">{isEnglish ? 'English deck' : '英文导语'}</div>
+                  <div className="mt-3 text-sm leading-7 text-slate-600">
+                    {detail?.translation_excerpt_en || (isEnglish ? 'Not generated yet' : '尚未生成')}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-5">
+                <RichPreviewEditor
+                  isEnglish
+                  contentVersion={translationSummaryEditorState.version}
+                  initialDocument={detail?.translation_summary_editor_document || null}
+                  initialHtml={detail?.summary_html_en || detail?.published_summary_html_en || ''}
+                  fallbackText={detail?.translation_summary_en || detail?.translation_excerpt_en || ''}
+                  statusText={translationStatus}
+                  formatterModel={detail?.translation_model}
+                  editorSource={translationSummaryEditorState.dirty ? 'manual_edited' : detail?.translation_ready ? 'ai_formatted' : null}
+                  isDirty={translationSummaryEditorState.dirty}
+                  hasUnpublishedChanges={Boolean(detail?.translation_has_unpublished_changes)}
+                  sectionKicker={isEnglish ? 'English Summary Draft' : '英文摘要成品区'}
+                  helperLineOverride={translationHelperLine}
+                  helpText={isEnglish ? 'Click inside the English summary canvas to adjust wording and emphasis before publishing.' : '直接点击英文摘要画布即可在发布前调整措辞、强调和段落节奏。'}
+                  editablePanelTitle={isEnglish ? 'Editable English summary canvas' : '可编辑英文摘要画布'}
+                  previewPanelTitle={isEnglish ? 'English summary rendered preview' : '英文摘要最终呈现预览'}
+                  editableFrameTitle="Editable English editorial summary frame"
+                  previewFrameTitle="English editorial summary preview frame"
+                  minFrameHeight={420}
+                  onChange={(nextState) =>
+                    setTranslationSummaryEditorState((current) => ({
+                      ...current,
+                      ...nextState,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="fudan-panel overflow-hidden p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="section-kicker">{isEnglish ? 'English final HTML preview' : '英文最终 HTML 预览'}</div>
+                  <div className="mt-2 text-sm text-slate-500">{translationStatus}</div>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                  <button
+                    type="button"
+                    onClick={handleSaveDraft}
+                    className="inline-flex items-center gap-2 rounded-full border border-fudan-blue/15 bg-fudan-blue/10 px-4 py-2 font-semibold text-fudan-blue"
+                  >
+                    {busy === 'save' ? <LoaderCircle size={15} className="animate-spin" /> : <Save size={15} />}
+                    {isEnglish ? 'Save draft' : '保存'}
+                  </button>
+                  {detail?.translation_updated_at ? <span>{detail.translation_updated_at}</span> : null}
+                </div>
+              </div>
+              <div className="mt-5">
+                <RichPreviewEditor
+                  isEnglish
+                  contentVersion={translationEditorState.version}
+                  initialDocument={detail?.translation_editor_document || null}
+                  initialHtml={detail?.final_html_en || detail?.html_web_en || detail?.html_wechat_en || ''}
+                  fallbackText={detail?.translation_content_en || ''}
+                  statusText={translationStatus}
+                  formatterModel={detail?.translation_model}
+                  editorSource={translationEditorState.dirty ? 'manual_edited' : detail?.translation_ready ? 'ai_formatted' : null}
+                  isDirty={translationEditorState.dirty}
+                  hasUnpublishedChanges={Boolean(detail?.translation_has_unpublished_changes)}
+                  sectionKicker={isEnglish ? 'English Final Draft' : '英文最终成品区'}
+                  helperLineOverride={translationHelperLine}
+                  helpText={isEnglish ? 'This English canvas follows the same editorial layout chain as the Chinese final draft and can be manually refined before publishing.' : '这份英文成品复用中文成品的排版链路，发布前也可以在这里继续人工微调。'}
+                  editablePanelTitle={isEnglish ? 'Editable English final canvas' : '可编辑英文最终成品画布'}
+                  previewPanelTitle={isEnglish ? 'English rendered preview' : '英文最终呈现预览'}
+                  editableFrameTitle="Editable English editorial frame"
+                  previewFrameTitle="English editorial preview frame"
+                  minFrameHeight={720}
+                  onChange={(nextState) =>
+                    setTranslationEditorState((current) => ({
+                      ...current,
+                      ...nextState,
+                    }))
+                  }
+                />
+              </div>
             </div>
             <div className="fudan-panel p-6">
               <div className="mb-3 flex items-center justify-between">

@@ -6,6 +6,7 @@ from datetime import date, datetime
 from fastapi import HTTPException
 
 from backend.database import connection_scope
+from backend.services.knowledge_profile_service import refresh_user_library_profile
 
 REACTION_TYPES = {"like", "bookmark"}
 
@@ -28,6 +29,32 @@ def sanitize_visitor_id(visitor_id: str | None) -> str | None:
 def _ensure_article_exists(connection, article_id: int) -> None:
     if connection.execute("SELECT 1 FROM articles WHERE id = ?", (article_id,)).fetchone() is None:
         raise HTTPException(status_code=404, detail="Article not found")
+
+
+def _sync_saved_article(connection, *, article_id: int, user_id: str, active: bool, timestamp: str) -> None:
+    existing = connection.execute(
+        "SELECT created_at FROM user_saved_articles WHERE user_id = ? AND article_id = ?",
+        (user_id, article_id),
+    ).fetchone()
+    created_at = existing["created_at"] if existing is not None else timestamp
+    connection.execute(
+        """
+        INSERT INTO user_saved_articles (
+            user_id,
+            article_id,
+            saved_via,
+            is_active,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, 'bookmark', ?, ?, ?)
+        ON CONFLICT(user_id, article_id) DO UPDATE SET
+            saved_via = excluded.saved_via,
+            is_active = excluded.is_active,
+            updated_at = excluded.updated_at
+        """,
+        (user_id, article_id, 1 if active else 0, created_at, timestamp),
+    )
 
 
 def _upsert_visitor(connection, visitor_id: str, user_id: str | None = None) -> None:
@@ -189,4 +216,9 @@ def set_article_reaction(article_id: int, user_id: str, reaction_type: str, acti
             (article_id, user_id, reaction_type, 1 if active else 0, timestamp, timestamp),
         )
         connection.commit()
+        if reaction_type == "bookmark":
+            _sync_saved_article(connection, article_id=article_id, user_id=user_id, active=active, timestamp=timestamp)
+            connection.commit()
+    if reaction_type == "bookmark":
+        refresh_user_library_profile(user_id)
     return get_article_engagement(article_id, user_id=user_id)
