@@ -58,9 +58,9 @@ function SearchPage() {
 
   useEffect(() => {
     fetchTags().then(setTagsData).catch(() => {})
-    fetchColumns().then(setColumns).catch(() => {})
+    fetchColumns(isEnglish ? 'en' : 'zh').then(setColumns).catch(() => {})
     setHistory(readSearchHistory())
-  }, [])
+  }, [isEnglish])
 
   const tagLookup = useMemo(() => {
     const map = new Map()

@@ -2,10 +2,25 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime
+from typing import Callable, TypeVar
 
-from backend.config import BILLING_PLAN_DEFINITIONS, PAYMENTS_ENABLED, PAYMENT_PROVIDER, SQLITE_DB_PATH
+from backend.config import (
+    BILLING_PLAN_DEFINITIONS,
+    DATABASE_BACKEND,
+    DATABASE_URL,
+    DB_OBSERVABILITY_ENABLED,
+    DB_SLOW_QUERY_MS,
+    DB_WRITE_RETRY_ATTEMPTS,
+    DB_WRITE_RETRY_BASE_DELAY_SECONDS,
+    PAYMENTS_ENABLED,
+    PAYMENT_PROVIDER,
+    SQLITE_DB_PATH,
+)
+
+T = TypeVar("T")
 
 REQUIRED_TABLES = {
     "articles",
@@ -26,6 +41,13 @@ def get_connection() -> sqlite3.Connection:
     connection = sqlite3.connect(SQLITE_DB_PATH, timeout=60)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA busy_timeout = 60000")
+    connection.execute("PRAGMA journal_mode = WAL")
+    connection.execute("PRAGMA synchronous = NORMAL")
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA cache_size = -65536")
+    connection.execute("PRAGMA temp_store = MEMORY")
+    connection.execute("PRAGMA mmap_size = 536870912")
+    connection.execute("PRAGMA wal_autocheckpoint = 1000")
     return connection
 
 
@@ -36,6 +58,166 @@ def connection_scope():
         yield connection
     finally:
         connection.close()
+
+
+def _is_sqlite_lock_error(exc: BaseException) -> bool:
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    message = str(exc).lower()
+    return "database is locked" in message or "database table is locked" in message or "database is busy" in message
+
+
+def _log_database_event(message: str) -> None:
+    if DB_OBSERVABILITY_ENABLED:
+        print(f"[database] {message}", flush=True)
+
+
+def run_write_transaction(
+    operation: Callable[[sqlite3.Connection], T],
+    *,
+    label: str = "write",
+    immediate: bool = True,
+) -> T:
+    attempts = DB_WRITE_RETRY_ATTEMPTS + 1
+    last_lock_error: sqlite3.OperationalError | None = None
+
+    for attempt in range(attempts):
+        connection = get_connection()
+        started_at = time.perf_counter()
+        try:
+            connection.execute("BEGIN IMMEDIATE" if immediate else "BEGIN")
+            result = operation(connection)
+            connection.commit()
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            if DB_SLOW_QUERY_MS and elapsed_ms >= DB_SLOW_QUERY_MS:
+                _log_database_event(f"slow write transaction label={label} elapsed_ms={elapsed_ms} attempt={attempt + 1}")
+            return result
+        except Exception as exc:
+            try:
+                connection.rollback()
+            except sqlite3.Error:
+                pass
+            if _is_sqlite_lock_error(exc) and attempt < attempts - 1:
+                last_lock_error = exc
+                delay = min(DB_WRITE_RETRY_BASE_DELAY_SECONDS * (2**attempt), 2.0)
+                _log_database_event(f"write lock retry label={label} attempt={attempt + 1}/{attempts} delay_seconds={delay:.2f}")
+                time.sleep(delay)
+                continue
+            raise
+        finally:
+            connection.close()
+
+    if last_lock_error:
+        raise last_lock_error
+    raise RuntimeError(f"write transaction failed without an exception: {label}")
+
+
+def _path_info(path) -> dict:
+    exists = path.exists()
+    return {
+        "path": str(path),
+        "exists": exists,
+        "size_bytes": path.stat().st_size if exists else 0,
+    }
+
+
+def _runtime_table_counts(connection: sqlite3.Connection, table_names: set[str]) -> dict:
+    counts: dict[str, int] = {}
+    for table_name in [
+        "async_tasks",
+        "article_view_events",
+        "retrieval_events",
+        "answer_events",
+        "ingestion_jobs",
+        "user_memberships",
+    ]:
+        if table_name not in table_names:
+            continue
+        counts[table_name] = int(connection.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0])
+    return counts
+
+
+def _async_task_status_counts(connection: sqlite3.Connection, table_names: set[str]) -> dict:
+    if "async_tasks" not in table_names:
+        return {}
+    rows = connection.execute("SELECT status, COUNT(*) AS total FROM async_tasks GROUP BY status").fetchall()
+    return {row["status"]: int(row["total"]) for row in rows}
+
+
+def _writable_probe(connection: sqlite3.Connection) -> dict:
+    started_at = time.perf_counter()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("ROLLBACK")
+        return {
+            "ok": True,
+            "latency_ms": int((time.perf_counter() - started_at) * 1000),
+            "error": None,
+        }
+    except sqlite3.Error as exc:
+        try:
+            connection.rollback()
+        except sqlite3.Error:
+            pass
+        return {
+            "ok": False,
+            "latency_ms": int((time.perf_counter() - started_at) * 1000),
+            "error": str(exc),
+        }
+
+
+def collect_database_diagnostics(*, include_writable_probe: bool = False) -> dict:
+    db_path = SQLITE_DB_PATH
+    wal_path = type(db_path)(str(db_path) + "-wal")
+    shm_path = type(db_path)(str(db_path) + "-shm")
+    diagnostics = {
+        "backend": DATABASE_BACKEND,
+        "database_url_configured": bool(DATABASE_URL),
+        "sqlite": {
+            "database": _path_info(db_path),
+            "wal": _path_info(wal_path),
+            "shm": _path_info(shm_path),
+        },
+        "quick_check": None,
+        "pragma": {},
+        "runtime_table_counts": {},
+        "async_task_status_counts": {},
+        "writable_probe": None,
+    }
+    if not db_path.exists():
+        diagnostics["quick_check"] = "missing"
+        return diagnostics
+
+    with connection_scope() as connection:
+        table_rows = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        table_names = {row["name"] for row in table_rows}
+        diagnostics["quick_check"] = connection.execute("PRAGMA quick_check(1)").fetchone()[0]
+        diagnostics["pragma"] = {
+            "journal_mode": connection.execute("PRAGMA journal_mode").fetchone()[0],
+            "synchronous": connection.execute("PRAGMA synchronous").fetchone()[0],
+            "foreign_keys": connection.execute("PRAGMA foreign_keys").fetchone()[0],
+            "cache_size": connection.execute("PRAGMA cache_size").fetchone()[0],
+            "temp_store": connection.execute("PRAGMA temp_store").fetchone()[0],
+            "mmap_size": connection.execute("PRAGMA mmap_size").fetchone()[0],
+            "wal_autocheckpoint": connection.execute("PRAGMA wal_autocheckpoint").fetchone()[0],
+            "page_count": connection.execute("PRAGMA page_count").fetchone()[0],
+            "freelist_count": connection.execute("PRAGMA freelist_count").fetchone()[0],
+            "page_size": connection.execute("PRAGMA page_size").fetchone()[0],
+            "schema_version": connection.execute("PRAGMA schema_version").fetchone()[0],
+            "user_version": connection.execute("PRAGMA user_version").fetchone()[0],
+        }
+        checkpoint_row = connection.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+        diagnostics["wal_checkpoint"] = {
+            "busy": int(checkpoint_row[0]),
+            "log_frames": int(checkpoint_row[1]),
+            "checkpointed_frames": int(checkpoint_row[2]),
+        }
+        diagnostics["runtime_table_counts"] = _runtime_table_counts(connection, table_names)
+        diagnostics["async_task_status_counts"] = _async_task_status_counts(connection, table_names)
+        if include_writable_probe:
+            diagnostics["writable_probe"] = _writable_probe(connection)
+
+    return diagnostics
 
 
 def database_is_ready() -> bool:
@@ -80,6 +262,50 @@ def ensure_runtime_tables() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_demo_requests_created_at
             ON demo_requests(created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS async_tasks (
+                id TEXT PRIMARY KEY,
+                task_type TEXT NOT NULL,
+                entity_type TEXT,
+                entity_id INTEGER,
+                status TEXT NOT NULL DEFAULT 'queued',
+                progress INTEGER NOT NULL DEFAULT 0,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                result_json TEXT,
+                error_message TEXT,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                max_attempts INTEGER NOT NULL DEFAULT 1,
+                locked_by TEXT,
+                locked_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_async_tasks_status
+            ON async_tasks(status, updated_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_async_tasks_entity
+            ON async_tasks(entity_type, entity_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                email TEXT,
+                raw_user_json TEXT NOT NULL DEFAULT '{}',
+                issued_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                revoked_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_auth_sessions_user
+            ON auth_sessions(user_id, expires_at DESC);
+
+            CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires
+            ON auth_sessions(expires_at, revoked_at);
 
             CREATE TABLE IF NOT EXISTS editorial_articles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -192,6 +418,9 @@ def ensure_runtime_tables() -> None:
             CREATE INDEX IF NOT EXISTS idx_article_view_events_article
             ON article_view_events(article_id, view_date DESC);
 
+            CREATE INDEX IF NOT EXISTS idx_article_view_events_trending
+            ON article_view_events(view_date DESC, article_id);
+
             CREATE INDEX IF NOT EXISTS idx_article_view_events_user
             ON article_view_events(user_id, created_at DESC);
 
@@ -208,6 +437,9 @@ def ensure_runtime_tables() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_article_reactions_article
             ON article_reactions(article_id, reaction_type, is_active);
+
+            CREATE INDEX IF NOT EXISTS idx_article_reactions_trending
+            ON article_reactions(reaction_type, is_active, updated_at DESC, article_id);
 
             CREATE INDEX IF NOT EXISTS idx_article_reactions_user
             ON article_reactions(user_id, updated_at DESC);
@@ -370,6 +602,22 @@ def ensure_runtime_tables() -> None:
             CREATE INDEX IF NOT EXISTS idx_user_theme_profiles_user
             ON user_theme_profiles(user_id, updated_at DESC, theme_id DESC);
 
+            CREATE TABLE IF NOT EXISTS user_daily_bookmarks (
+                user_id TEXT NOT NULL,
+                bookmark_date TEXT NOT NULL,
+                language TEXT NOT NULL DEFAULT 'zh',
+                source_hash TEXT NOT NULL,
+                primary_theme TEXT,
+                article_count INTEGER NOT NULL DEFAULT 0,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, bookmark_date, language)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_user_daily_bookmarks_user
+            ON user_daily_bookmarks(user_id, bookmark_date DESC, updated_at DESC);
+
             CREATE TABLE IF NOT EXISTS retrieval_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id TEXT,
@@ -441,6 +689,8 @@ def ensure_runtime_tables() -> None:
                 status TEXT NOT NULL DEFAULT 'active',
                 role_home_path TEXT NOT NULL DEFAULT '/',
                 auth_source TEXT NOT NULL DEFAULT 'supabase',
+                cas_username TEXT,
+                cas_employee_number TEXT,
                 locale TEXT NOT NULL DEFAULT 'zh-CN',
                 is_seed INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
@@ -497,6 +747,13 @@ def ensure_runtime_tables() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_media_items_kind
             ON media_items(kind, status, publish_date DESC, sort_order ASC);
+
+            CREATE TABLE IF NOT EXISTS media_seed_tombstones (
+                kind TEXT NOT NULL,
+                slug TEXT NOT NULL,
+                deleted_at TEXT NOT NULL,
+                PRIMARY KEY (kind, slug)
+            );
 
             CREATE TABLE IF NOT EXISTS media_drafts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -677,6 +934,7 @@ def ensure_runtime_tables() -> None:
 
             CREATE TABLE IF NOT EXISTS home_content_slots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                language TEXT NOT NULL DEFAULT 'zh',
                 slot_key TEXT NOT NULL,
                 entity_type TEXT NOT NULL,
                 entity_id INTEGER,
@@ -689,7 +947,7 @@ def ensure_runtime_tables() -> None:
             );
 
             CREATE INDEX IF NOT EXISTS idx_home_content_slots_slot
-            ON home_content_slots(slot_key, is_active, sort_order ASC, id ASC);
+            ON home_content_slots(language, slot_key, is_active, sort_order ASC, id ASC);
 
             CREATE TABLE IF NOT EXISTS home_trending_config (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -768,6 +1026,49 @@ def ensure_runtime_tables() -> None:
             connection.execute("ALTER TABLE editorial_articles ADD COLUMN html_wechat_en TEXT")
         if not _table_has_column(connection, "editorial_articles", "translation_status"):
             connection.execute("ALTER TABLE editorial_articles ADD COLUMN translation_status TEXT NOT NULL DEFAULT 'pending'")
+        if not _table_has_column(connection, "home_content_slots", "language"):
+            connection.execute("ALTER TABLE home_content_slots ADD COLUMN language TEXT NOT NULL DEFAULT 'zh'")
+        connection.execute("UPDATE home_content_slots SET language = 'zh' WHERE COALESCE(language, '') = ''")
+        english_home_slot_count = connection.execute(
+            "SELECT COUNT(*) AS total FROM home_content_slots WHERE language = 'en'"
+        ).fetchone()["total"]
+        if english_home_slot_count == 0:
+            connection.execute(
+                """
+                INSERT INTO home_content_slots (
+                    language,
+                    slot_key,
+                    entity_type,
+                    entity_id,
+                    entity_slug,
+                    sort_order,
+                    is_active,
+                    metadata_json,
+                    created_at,
+                    updated_at
+                )
+                SELECT
+                    'en',
+                    slot_key,
+                    entity_type,
+                    entity_id,
+                    entity_slug,
+                    sort_order,
+                    is_active,
+                    metadata_json,
+                    created_at,
+                    updated_at
+                FROM home_content_slots
+                WHERE language = 'zh'
+                """
+            )
+        connection.execute("DROP INDEX IF EXISTS idx_home_content_slots_slot")
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_home_content_slots_slot
+            ON home_content_slots(language, slot_key, is_active, sort_order ASC, id ASC)
+            """
+        )
         if not _table_has_column(connection, "editorial_articles", "translation_error"):
             connection.execute("ALTER TABLE editorial_articles ADD COLUMN translation_error TEXT")
         if not _table_has_column(connection, "editorial_articles", "translation_model"):
@@ -890,6 +1191,16 @@ def ensure_runtime_tables() -> None:
         )
         if not _table_has_column(connection, "business_users", "description"):
             connection.execute("ALTER TABLE business_users ADD COLUMN description TEXT")
+        if not _table_has_column(connection, "business_users", "cas_username"):
+            connection.execute("ALTER TABLE business_users ADD COLUMN cas_username TEXT")
+        if not _table_has_column(connection, "business_users", "cas_employee_number"):
+            connection.execute("ALTER TABLE business_users ADD COLUMN cas_employee_number TEXT")
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_business_users_cas_employee
+            ON business_users(cas_employee_number)
+            """
+        )
         if not _table_has_column(connection, "article_ai_outputs", "translation_title_en"):
             connection.execute("ALTER TABLE article_ai_outputs ADD COLUMN translation_title_en TEXT")
         if not _table_has_column(connection, "article_ai_outputs", "translation_excerpt_en"):

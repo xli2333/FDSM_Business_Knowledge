@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import json
+import mimetypes
+import posixpath
 import re
 from datetime import date, datetime
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlsplit
 
 from fastapi import HTTPException, UploadFile
 
-from backend.config import MEDIA_UPLOADS_DIR
+from backend.config import (
+    MEDIA_AUDIO_UPLOAD_MAX_BYTES,
+    MEDIA_TEXT_UPLOAD_MAX_BYTES,
+    MEDIA_UPLOADS_DIR,
+    MEDIA_VIDEO_UPLOAD_MAX_BYTES,
+)
 from backend.database import connection_scope
 from backend.services import ai_service
 from backend.services.html_renderer import strip_markdown
@@ -32,7 +39,12 @@ ALLOWED_UPLOAD_EXTENSIONS = {
     "audio": {".mp3", ".wav", ".m4a", ".aac", ".ogg"},
     "video": {".mp4", ".mov", ".m4v", ".webm"},
 }
-ALLOWED_TEXT_UPLOAD_EXTENSIONS = {".md", ".txt", ".html", ".htm", ".docx"}
+ALLOWED_TEXT_UPLOAD_EXTENSIONS = {".md", ".txt", ".docx"}
+MEDIA_UPLOAD_MAX_BYTES = {
+    "audio": MEDIA_AUDIO_UPLOAD_MAX_BYTES,
+    "video": MEDIA_VIDEO_UPLOAD_MAX_BYTES,
+}
+MEDIA_UPLOAD_HEADER_BYTES = 512
 LEGACY_AUDIO_SEED_SLUGS = {
     "audio-ai-decision-lab",
     "audio-case-briefing-weekly",
@@ -258,6 +270,118 @@ def _normalize_visibility(value: str | None) -> str:
     return normalized
 
 
+async def _peek_upload_header(upload: UploadFile, size: int = MEDIA_UPLOAD_HEADER_BYTES) -> bytes:
+    await upload.seek(0)
+    header = await upload.read(size)
+    await upload.seek(0)
+    return header
+
+
+def _has_mp3_frame_sync(header: bytes) -> bool:
+    return len(header) >= 2 and header[0] == 0xFF and (header[1] & 0xE0) == 0xE0
+
+
+def _has_mp4_ftyp(header: bytes) -> bool:
+    return len(header) >= 12 and b"ftyp" in header[4:16]
+
+
+def _media_signature_matches(kind: str, suffix: str, header: bytes) -> bool:
+    if kind == "audio":
+        if suffix == ".mp3":
+            return header.startswith(b"ID3") or _has_mp3_frame_sync(header)
+        if suffix == ".wav":
+            return len(header) >= 12 and header.startswith(b"RIFF") and header[8:12] == b"WAVE"
+        if suffix in {".m4a", ".aac"}:
+            return _has_mp4_ftyp(header) or header.startswith((b"\xff\xf1", b"\xff\xf9"))
+        if suffix == ".ogg":
+            return header.startswith(b"OggS")
+        return False
+    if kind == "video":
+        if suffix in {".mp4", ".mov", ".m4v"}:
+            return _has_mp4_ftyp(header)
+        if suffix == ".webm":
+            return header.startswith(b"\x1a\x45\xdf\xa3")
+        return False
+    return False
+
+
+async def _validate_media_upload_signature(
+    *,
+    kind: str,
+    suffix: str,
+    upload_file: UploadFile,
+) -> None:
+    header = await _peek_upload_header(upload_file)
+    if not header:
+        raise HTTPException(status_code=400, detail="Uploaded media file is empty")
+    if not _media_signature_matches(kind, suffix, header):
+        raise HTTPException(status_code=400, detail="Uploaded media content does not match its file type")
+
+
+def _looks_like_html_upload(raw_bytes: bytes) -> bool:
+    return bool(re.match(rb"^\s*(?:<!doctype\s+html\b|<html[\s>]|<script[\s>])", raw_bytes[:512], re.IGNORECASE))
+
+
+def _is_local_media_asset_url(value: str | None) -> bool:
+    path = urlsplit(str(value or "").strip()).path
+    if path.startswith("/audio-files/"):
+        return True
+    return bool(re.match(r"^/media-uploads/(?:audio|video)/media/", path))
+
+
+def _build_media_stream_url(kind: str, slug: str) -> str:
+    return f"/api/media/{quote(kind, safe='')}/{quote(slug, safe='')}/stream"
+
+
+def _public_asset_url(row, *, accessible: bool) -> str | None:
+    media_url = str(row["media_url"] or "").strip()
+    if not accessible:
+        return None
+    if _is_local_media_asset_url(media_url):
+        return _build_media_stream_url(row["kind"], row["slug"])
+    return media_url or None
+
+
+def _public_source_url(row, *, accessible: bool) -> str | None:
+    source_url = str(row["source_url"] or "").strip()
+    if _is_local_media_asset_url(source_url):
+        return _build_media_stream_url(row["kind"], row["slug"]) if accessible else None
+    return source_url or None
+
+
+def _public_preview_url(row, *, accessible: bool) -> str | None:
+    if accessible:
+        return ""
+    preview_url = str(row["preview_url"] or "").strip()
+    media_url = str(row["media_url"] or "").strip()
+    if preview_url and preview_url != media_url:
+        return preview_url
+    if preview_url and not _is_local_media_asset_url(preview_url):
+        return preview_url
+    return None
+
+
+def _safe_accel_path(value: str | None, kind: str) -> str | None:
+    raw_path = urlsplit(str(value or "").strip()).path
+    decoded_path = unquote(raw_path)
+    normalized_path = posixpath.normpath(decoded_path)
+    if not normalized_path.startswith("/"):
+        normalized_path = f"/{normalized_path}"
+    if "\x00" in normalized_path or "/../" in f"{normalized_path}/":
+        return None
+    allowed_prefixes = [f"/media-uploads/{kind}/media/"]
+    if kind == "audio":
+        allowed_prefixes.append("/audio-files/")
+    if not any(normalized_path.startswith(prefix) for prefix in allowed_prefixes):
+        return None
+    return quote(normalized_path, safe="/._-")
+
+
+def _response_filename_from_url(value: str | None, fallback: str) -> str:
+    filename = posixpath.basename(unquote(urlsplit(str(value or "")).path)) or fallback
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", filename)[:160] or fallback
+
+
 def _normalize_status(value: str | None) -> str:
     normalized = (value or "").strip() or "draft"
     if normalized not in VALID_STATUSES:
@@ -329,6 +453,29 @@ def _sanitize_filename(value: str) -> str:
     stem = re.sub(r"[^\w\u4e00-\u9fff-]+", "-", Path(raw).stem).strip("-")
     suffix = Path(raw).suffix.lower()
     return f"{stem[:80] or 'media'}{suffix}"
+
+
+def _local_audio_seed_slugs() -> set[str]:
+    return {str(item.get("slug") or "").strip() for item in LOCAL_AUDIO_ITEMS if str(item.get("slug") or "").strip()}
+
+
+def _is_local_audio_seed(slug: str | None, kind: str | None) -> bool:
+    return kind == "audio" and str(slug or "").strip() in _local_audio_seed_slugs()
+
+
+def _record_media_seed_tombstone(connection, *, kind: str | None, slug: str | None) -> None:
+    normalized_kind = str(kind or "").strip()
+    normalized_slug = str(slug or "").strip()
+    if not _is_local_audio_seed(normalized_slug, normalized_kind):
+        return
+    connection.execute(
+        """
+        INSERT INTO media_seed_tombstones (kind, slug, deleted_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(kind, slug) DO UPDATE SET deleted_at = excluded.deleted_at
+        """,
+        (normalized_kind, normalized_slug, datetime_now_iso()),
+    )
 
 
 def _load_chapters(raw: str | None) -> list[dict]:
@@ -813,7 +960,9 @@ def _serialize_media_row(row, membership: dict | None = None) -> dict:
     effective_visibility = _apply_visibility_policy(row["kind"], row["visibility"])
     accessible, gate_copy = _resolve_access(row["kind"], effective_visibility, membership)
     transcript_excerpt = _extract_excerpt(row["transcript_markdown"] or row["body_markdown"] or row["summary"])
-    preview_url = row["preview_url"] or (row["media_url"] if not accessible else "")
+    public_media_url = _public_asset_url(row, accessible=accessible)
+    preview_url = _public_preview_url(row, accessible=accessible)
+    source_url = _public_source_url(row, accessible=accessible)
     preview_duration_seconds = 0 if accessible else min(max(0, int(row["duration_seconds"] or 0)), MEDIA_PREVIEW_SECONDS)
     return {
         "id": row["id"],
@@ -835,10 +984,10 @@ def _serialize_media_row(row, membership: dict | None = None) -> dict:
         "accessible": accessible,
         "gate_copy": gate_copy,
         "cover_image_url": row["cover_image_url"],
-        "media_url": row["media_url"] if accessible else None,
+        "media_url": public_media_url,
         "preview_url": preview_url,
         "preview_duration_seconds": preview_duration_seconds,
-        "source_url": row["source_url"],
+        "source_url": source_url,
         "transcript_excerpt": transcript_excerpt,
         "chapter_count": len(chapters),
         "has_unpublished_changes": False,
@@ -1227,6 +1376,42 @@ def get_media_item_detail(kind: str, slug: str, membership: dict) -> dict:
     return _serialize_media_row(row, membership)
 
 
+def get_media_stream_target(kind: str, slug: str, membership: dict) -> dict:
+    sync_local_audio_library()
+    normalized_kind = _normalize_kind(kind)
+    normalized_slug = str(slug or "").strip()
+    if not normalized_slug:
+        raise HTTPException(status_code=404, detail="Media item not found")
+
+    with connection_scope() as connection:
+        row = connection.execute(
+            """
+            SELECT id, slug, kind, title, visibility, status, media_url
+            FROM media_items
+            WHERE kind = ? AND slug = ? AND status = 'published'
+            LIMIT 1
+            """,
+            (normalized_kind, normalized_slug),
+        ).fetchone()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Media item not found")
+    accessible, gate_copy = _resolve_access(row["kind"], row["visibility"], membership)
+    if not accessible:
+        raise HTTPException(status_code=403, detail=gate_copy or "Media access denied")
+    accel_path = _safe_accel_path(row["media_url"], row["kind"])
+    if not accel_path:
+        raise HTTPException(status_code=404, detail="Media file is not available")
+    filename = _response_filename_from_url(row["media_url"], f"{row['slug']}.bin")
+    guessed_type = mimetypes.guess_type(filename)[0]
+    content_type = guessed_type or ("audio/mpeg" if row["kind"] == "audio" else "video/mp4")
+    return {
+        "x_accel_redirect": accel_path,
+        "content_type": content_type,
+        "filename": filename,
+    }
+
+
 def list_admin_media_items(
     kind: str | None = None,
     status: str | None = None,
@@ -1449,13 +1634,189 @@ def delete_media_item(media_id: int) -> dict:
     with connection_scope() as connection:
         row = dict(_fetch_media_draft_row(connection, media_id))
         linked_media_id = row.get("media_item_id")
+        delete_linked_media_id: int | None = None
         if linked_media_id:
-            linked_row = connection.execute("SELECT status FROM media_items WHERE id = ?", (linked_media_id,)).fetchone()
+            linked_row = connection.execute("SELECT slug, kind, status FROM media_items WHERE id = ?", (linked_media_id,)).fetchone()
             if linked_row is not None and linked_row["status"] != "published":
-                connection.execute("DELETE FROM media_items WHERE id = ?", (linked_media_id,))
+                _record_media_seed_tombstone(
+                    connection,
+                    kind=linked_row["kind"],
+                    slug=linked_row["slug"],
+                )
+                delete_linked_media_id = int(linked_media_id)
         connection.execute("DELETE FROM media_drafts WHERE id = ?", (media_id,))
+        if delete_linked_media_id is not None:
+            connection.execute("DELETE FROM media_items WHERE id = ?", (delete_linked_media_id,))
         connection.commit()
     return {"media_id": media_id, "deleted": True}
+
+
+def unpublish_media_item_to_draft(media_item_id: int) -> dict:
+    with connection_scope() as connection:
+        source_row = _fetch_published_media_row(connection, media_item_id)
+        if source_row["status"] != "published":
+            raise HTTPException(status_code=400, detail="Only published media items can be moved back to the draft box")
+
+        timestamp = datetime_now_iso()
+        existing = connection.execute(
+            """
+            SELECT *
+            FROM media_drafts
+            WHERE media_item_id = ?
+            ORDER BY
+                CASE draft_box_state
+                    WHEN 'active' THEN 0
+                    ELSE 1
+                END,
+                updated_at DESC,
+                id DESC
+            LIMIT 1
+            """,
+            (media_item_id,),
+        ).fetchone()
+
+        if existing is not None:
+            current = dict(existing)
+            if _normalize_draft_box_state(current.get("draft_box_state")) == DRAFT_BOX_STATE_ACTIVE:
+                draft_id = int(current["id"])
+                connection.execute(
+                    """
+                    UPDATE media_drafts
+                    SET status = 'draft',
+                        draft_box_state = ?,
+                        workflow_status = 'draft',
+                        published_payload_json = '{}',
+                        published_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (DRAFT_BOX_STATE_ACTIVE, timestamp, draft_id),
+                )
+            else:
+                draft_slug = _unique_slug(connection, "media_drafts", source_row["slug"], exclude_id=int(current["id"]))
+                draft_id = int(current["id"])
+                connection.execute(
+                    """
+                    UPDATE media_drafts
+                    SET slug = ?,
+                        kind = ?,
+                        title = ?,
+                        summary = ?,
+                        speaker = ?,
+                        series_name = ?,
+                        episode_number = ?,
+                        publish_date = ?,
+                        duration_seconds = ?,
+                        visibility = ?,
+                        cover_image_url = ?,
+                        media_url = ?,
+                        source_url = ?,
+                        body_markdown = ?,
+                        transcript_markdown = ?,
+                        script_markdown = ?,
+                        chapter_payload_json = ?,
+                        status = 'draft',
+                        draft_box_state = ?,
+                        workflow_status = 'draft',
+                        published_payload_json = '{}',
+                        published_at = NULL,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        draft_slug,
+                        source_row["kind"],
+                        source_row["title"],
+                        source_row["summary"],
+                        source_row["speaker"],
+                        source_row["series_name"],
+                        source_row["episode_number"],
+                        source_row["publish_date"],
+                        source_row["duration_seconds"],
+                        _apply_visibility_policy(source_row["kind"], source_row["visibility"]),
+                        source_row["cover_image_url"],
+                        source_row["media_url"],
+                        source_row["source_url"],
+                        source_row["body_markdown"],
+                        source_row["transcript_markdown"],
+                        source_row["script_markdown"] if "script_markdown" in source_row.keys() else "",
+                        source_row["chapter_payload_json"],
+                        DRAFT_BOX_STATE_ACTIVE,
+                        timestamp,
+                        draft_id,
+                    ),
+                )
+        else:
+            draft_slug = _unique_slug(connection, "media_drafts", source_row["slug"])
+            connection.execute(
+                """
+                INSERT INTO media_drafts (
+                    media_item_id,
+                    slug,
+                    kind,
+                    title,
+                    summary,
+                    speaker,
+                    series_name,
+                    episode_number,
+                    publish_date,
+                    duration_seconds,
+                    visibility,
+                    status,
+                    draft_box_state,
+                    workflow_status,
+                    cover_image_url,
+                    media_url,
+                    source_url,
+                    body_markdown,
+                    transcript_markdown,
+                    script_markdown,
+                    chapter_payload_json,
+                    published_payload_json,
+                    created_at,
+                    updated_at,
+                    published_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, 'draft', ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?, NULL)
+                """,
+                (
+                    media_item_id,
+                    draft_slug,
+                    source_row["kind"],
+                    source_row["title"],
+                    source_row["summary"],
+                    source_row["speaker"],
+                    source_row["series_name"],
+                    source_row["episode_number"],
+                    source_row["publish_date"],
+                    source_row["duration_seconds"],
+                    _apply_visibility_policy(source_row["kind"], source_row["visibility"]),
+                    DRAFT_BOX_STATE_ACTIVE,
+                    source_row["cover_image_url"],
+                    source_row["media_url"],
+                    source_row["source_url"],
+                    source_row["body_markdown"],
+                    source_row["transcript_markdown"],
+                    source_row["script_markdown"] if "script_markdown" in source_row.keys() else "",
+                    source_row["chapter_payload_json"],
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            draft_id = int(connection.execute("SELECT last_insert_rowid()").fetchone()[0])
+
+        connection.execute(
+            """
+            UPDATE media_items
+            SET status = 'draft',
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (timestamp, media_item_id),
+        )
+        connection.commit()
+
+    return get_admin_media_item(draft_id)
 
 
 def generate_media_copy(media_id: int) -> dict:
@@ -1885,18 +2246,26 @@ def open_published_media_edit_draft(media_item_id: int) -> dict:
     return get_admin_media_item(draft_id)
 
 
-async def _write_upload_stream(upload: UploadFile, target_path: Path) -> int:
+async def _write_upload_stream(upload: UploadFile, target_path: Path, *, max_bytes: int) -> int:
     target_path.parent.mkdir(parents=True, exist_ok=True)
     total_bytes = 0
     await upload.seek(0)
-    with target_path.open("wb") as handle:
-        while True:
-            chunk = await upload.read(UPLOAD_CHUNK_SIZE)
-            if not chunk:
-                break
-            handle.write(chunk)
-            total_bytes += len(chunk)
+    try:
+        with target_path.open("wb") as handle:
+            while True:
+                chunk = await upload.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > max_bytes:
+                    raise HTTPException(status_code=413, detail="Uploaded media file is too large")
+                handle.write(chunk)
+    except Exception:
+        target_path.unlink(missing_ok=True)
+        raise
     await upload.seek(0)
+    if total_bytes <= 0:
+        raise HTTPException(status_code=400, detail="Uploaded media file is empty")
     return total_bytes
 
 
@@ -1925,9 +2294,18 @@ async def upload_media_asset(
     if normalized_usage == "media":
         if suffix not in ALLOWED_UPLOAD_EXTENSIONS[normalized_kind]:
             raise HTTPException(status_code=400, detail="Unsupported media file type")
+        await _validate_media_upload_signature(
+            kind=normalized_kind,
+            suffix=suffix,
+            upload_file=upload_file,
+        )
         final_name = f"{timestamp}-{base_stem}{suffix}"
         target_path = target_dir / final_name
-        size_bytes = await _write_upload_stream(upload_file, target_path)
+        size_bytes = await _write_upload_stream(
+            upload_file,
+            target_path,
+            max_bytes=MEDIA_UPLOAD_MAX_BYTES[normalized_kind],
+        )
         relative_url = f"/media-uploads/{normalized_kind}/{normalized_usage}/{quote(final_name)}"
         detected_duration = max(0, int(duration_seconds or 0))
         inferred_title = _compact_text(re.sub(r"[-_]+", " ", Path(safe_name).stem))
@@ -2017,6 +2395,10 @@ async def upload_media_asset(
     raw_bytes = await upload_file.read()
     if not raw_bytes:
         raise HTTPException(status_code=400, detail="Uploaded text file is empty")
+    if len(raw_bytes) > MEDIA_TEXT_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="Uploaded text file is too large")
+    if _looks_like_html_upload(raw_bytes):
+        raise HTTPException(status_code=400, detail="HTML uploads are not supported")
     final_name = f"{timestamp}-{base_stem}{suffix}"
     target_path = target_dir / final_name
     target_path.write_bytes(raw_bytes)
@@ -2084,11 +2466,19 @@ def sync_local_audio_library() -> None:
             file_path = audio_directory / item["file_name"]
             if not file_path.exists():
                 continue
-            media_url = f"/audio-files/{quote(item['file_name'])}"
-            existing = connection.execute(
-                "SELECT id FROM media_items WHERE slug = ?",
+            tombstone = connection.execute(
+                "SELECT 1 FROM media_seed_tombstones WHERE kind = 'audio' AND slug = ?",
                 (item["slug"],),
             ).fetchone()
+            if tombstone is not None:
+                continue
+            media_url = f"/audio-files/{quote(item['file_name'])}"
+            existing = connection.execute(
+                "SELECT id, status FROM media_items WHERE slug = ?",
+                (item["slug"],),
+            ).fetchone()
+            if existing is not None and existing["status"] != "published":
+                continue
             created_at = datetime_now_iso()
             updated_at = datetime_now_iso()
             common_payload = (

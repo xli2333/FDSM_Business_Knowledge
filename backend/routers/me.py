@@ -3,13 +3,15 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, HTTPException
 
 from backend.models.schemas import (
+    TodayBookmarkResponse,
     UserDashboardResponse,
     UserLibraryChatRequest,
     UserLibraryChatResponse,
     UserLibraryResponse,
 )
+from backend.services.daily_bookmark_service import get_today_bookmark
 from backend.services.membership_service import get_membership_profile
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 from backend.services.user_activity_service import chat_with_user_library, get_user_library
 from backend.services.user_profile_service import get_user_dashboard
 
@@ -45,6 +47,30 @@ def my_library(
     if not user:
         raise HTTPException(status_code=401, detail="Login required")
     return get_user_library(user["id"], limit=limit)
+
+
+@router.get("/bookmark/today", response_model=TodayBookmarkResponse)
+def my_today_bookmark(
+    target_date: str | None = None,
+    language: str = "zh",
+    force_refresh: bool = False,
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    user = get_authenticated_user(
+        authorization,
+        debug_user_id=x_debug_user_id,
+        debug_user_email=x_debug_user_email,
+    )
+    if not user:
+        raise HTTPException(status_code=401, detail="Login required")
+    return get_today_bookmark(
+        user["id"],
+        target_date=target_date,
+        language=language,
+        force_refresh=force_refresh,
+    )
 
 
 @router.post("/library/chat", response_model=UserLibraryChatResponse)

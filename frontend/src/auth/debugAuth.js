@@ -1,6 +1,10 @@
 const DEBUG_AUTH_STORAGE_KEY = 'fdsm-debug-auth'
+const DEBUG_AUTH_ENABLED = import.meta.env.DEV
+  ? import.meta.env.VITE_ENABLE_DEBUG_AUTH !== '0'
+  : import.meta.env.VITE_ENABLE_DEBUG_AUTH === '1'
 
 export function loadDebugAuth() {
+  if (!DEBUG_AUTH_ENABLED) return null
   if (typeof window === 'undefined') return null
   try {
     const raw = window.localStorage.getItem(DEBUG_AUTH_STORAGE_KEY)
@@ -19,6 +23,7 @@ export function loadDebugAuth() {
 }
 
 export function saveDebugAuth(account) {
+  if (!DEBUG_AUTH_ENABLED) return
   if (typeof window === 'undefined') return
   window.localStorage.setItem(
     DEBUG_AUTH_STORAGE_KEY,
@@ -37,6 +42,7 @@ export function clearDebugAuth() {
 }
 
 export function getDebugAuthHeaders() {
+  if (!DEBUG_AUTH_ENABLED) return {}
   const payload = loadDebugAuth()
   if (!payload?.user_id) return {}
   return {

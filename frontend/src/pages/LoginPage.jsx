@@ -1,6 +1,7 @@
 import { ArrowRight, LockKeyhole, Mail } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { resolveApiUrl } from '../api/index.js'
 import { useAuth } from '../auth/AuthContext.js'
 import { useLanguage } from '../i18n/LanguageContext.js'
 import { getRoleExperience, resolveRoleTier } from '../lib/roleExperience.js'
@@ -26,11 +27,16 @@ function LoginPage() {
     signInWithPassword,
     signOut,
     authError,
+    authMode,
   } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const redirect = searchParams.get('redirect') || ''
+  const casLoginUrl = useMemo(() => {
+    const suffix = redirect ? `?redirect=${encodeURIComponent(redirect)}` : ''
+    return resolveApiUrl(`/api/auth/cas/login${suffix}`)
+  }, [redirect])
 
   const currentTier = resolveRoleTier({ membership, isAuthenticated })
   const currentExperience = getRoleExperience(currentTier, isEnglish)
@@ -163,6 +169,17 @@ function LoginPage() {
                     {isEnglish ? 'Switch account' : '切换账号'}
                   </button>
                 </div>
+              </div>
+            ) : authEnabled && authMode === 'cas' ? (
+              <div className="mt-6 space-y-4">
+                <a
+                  href={casLoginUrl}
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-fudan-blue px-5 py-3 text-sm font-semibold text-white transition hover:bg-fudan-dark"
+                >
+                  {isEnglish ? 'Sign in with Fudan CAS' : '使用复旦统一身份认证登录'}
+                  <ArrowRight size={16} />
+                </a>
+                {authError ? <div className="text-sm text-rose-600">{authError}</div> : null}
               </div>
             ) : authEnabled ? (
               <form onSubmit={handleSubmit} className="mt-6 space-y-4">

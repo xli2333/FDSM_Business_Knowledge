@@ -10,7 +10,7 @@ from backend.models.schemas import (
     DemoRequestSummary,
 )
 from backend.services.membership_service import require_admin_profile
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 from backend.services.commerce_service import (
     create_demo_request,
     export_demo_requests_csv,

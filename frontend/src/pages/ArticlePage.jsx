@@ -12,11 +12,12 @@ import {
   Languages,
   LoaderCircle,
   Lock,
+  Trash2,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { createElement, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext.js'
-import { fetchArticle, fetchArticleTranslation, reopenEditorialSourceArticle, submitArticleReaction } from '../api/index.js'
+import { deletePublishedArticle, fetchArticle, fetchArticleTranslation, reopenEditorialSourceArticle, submitArticleReaction } from '../api/index.js'
 import KnowledgeThemeComposerModal from '../components/knowledge/KnowledgeThemeComposerModal.jsx'
 import AutoHeightPreviewFrame from '../components/shared/AutoHeightPreviewFrame.jsx'
 import ArticleCard from '../components/shared/ArticleCard.jsx'
@@ -247,7 +248,7 @@ function buildFallbackPreviewDoc(text, { compact = false } = {}) {
 </html>`
 }
 
-function MetricPill({ icon: Icon, value, tone = 'blue' }) {
+function MetricPill({ icon, value, tone = 'blue' }) {
   const toneClass =
     tone === 'orange'
       ? 'text-fudan-orange'
@@ -257,7 +258,7 @@ function MetricPill({ icon: Icon, value, tone = 'blue' }) {
 
   return (
     <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-slate-600 shadow-[0_8px_24px_rgba(15,23,42,0.05)]">
-      <Icon size={16} className={toneClass} />
+      {createElement(icon, { size: 16, className: toneClass })}
       {value}
     </span>
   )
@@ -280,6 +281,7 @@ function ArticlePage() {
   const [relatedTranslationsLoading, setRelatedTranslationsLoading] = useState(false)
   const [summaryExpanded, setSummaryExpanded] = useState(false)
   const [reopenBusy, setReopenBusy] = useState(false)
+  const [deleteBusy, setDeleteBusy] = useState(false)
   const [knowledgeModalOpen, setKnowledgeModalOpen] = useState(false)
 
   useEffect(() => {
@@ -414,7 +416,7 @@ function ArticlePage() {
   }
 
   const handleReopenDraft = async () => {
-    if (!article?.id || reopenBusy) return
+    if (!article?.id || reopenBusy || deleteBusy) return
     setReopenBusy(true)
     setStatusHint('')
     try {
@@ -424,6 +426,26 @@ function ArticlePage() {
       setStatusHint(error?.message || (isEnglish ? 'Failed to reopen this article in the draft box.' : '打回草稿箱失败。'))
     } finally {
       setReopenBusy(false)
+    }
+  }
+
+  const handleDeletePublishedArticle = async () => {
+    if (!article?.id || deleteBusy || reopenBusy) return
+    const confirmed = window.confirm(
+      isEnglish
+        ? `Delete "${article.title}" from the live article page and move it back to the draft box?`
+        : `确定将《${article.title}》从正式文章页删除并退回编辑台草稿箱吗？`,
+    )
+    if (!confirmed) return
+    setDeleteBusy(true)
+    setStatusHint('')
+    try {
+      const payload = await deletePublishedArticle(article.id, accessToken)
+      navigate(`/editorial?editorial_id=${payload.id}&unpublished=1`)
+    } catch (error) {
+      setStatusHint(error?.message || (isEnglish ? 'Failed to delete this article back to drafts.' : '删除并退回草稿箱失败。'))
+    } finally {
+      setDeleteBusy(false)
     }
   }
 
@@ -669,13 +691,10 @@ function ArticlePage() {
                 ) : null}
               </div>
 
-              {translatedActive && (translation?.cached || translation?.model) ? (
+              {translatedActive && translation?.cached ? (
                 <div className="flex flex-wrap items-center gap-3 border-t border-slate-200/70 bg-white px-5 py-4 md:px-6">
                   {translation?.cached ? (
                     <div className="rounded-full border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-500">Cached</div>
-                  ) : null}
-                  {translation?.model ? (
-                    <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-500">{translation.model}</div>
                   ) : null}
                 </div>
               ) : null}
@@ -695,15 +714,27 @@ function ArticlePage() {
                   </div>
                 ) : null}
                 {isAdmin ? (
-                  <button
-                    type="button"
-                    onClick={handleReopenDraft}
-                    disabled={reopenBusy}
-                    className="inline-flex items-center gap-2 rounded-full border border-fudan-blue/15 bg-white px-4 py-2 text-sm font-semibold text-fudan-blue transition hover:border-fudan-blue/35 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {reopenBusy ? <LoaderCircle size={15} className="animate-spin" /> : <FilePenLine size={15} />}
-                    {isEnglish ? 'Reopen in editorial' : '打回草稿箱修改'}
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={handleReopenDraft}
+                      disabled={reopenBusy || deleteBusy}
+                      className="inline-flex items-center gap-2 rounded-full border border-fudan-blue/15 bg-white px-4 py-2 text-sm font-semibold text-fudan-blue transition hover:border-fudan-blue/35 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {reopenBusy ? <LoaderCircle size={15} className="animate-spin" /> : <FilePenLine size={15} />}
+                      {isEnglish ? 'Reopen in editorial' : '打回草稿箱修改'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDeletePublishedArticle}
+                      disabled={deleteBusy || reopenBusy}
+                      title={isEnglish ? 'Delete to draft box' : '删除并退回草稿箱'}
+                      className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {deleteBusy ? <LoaderCircle size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                      {isEnglish ? 'Delete to drafts' : '删除退回草稿箱'}
+                    </button>
+                  </div>
                 ) : null}
               </div>
 

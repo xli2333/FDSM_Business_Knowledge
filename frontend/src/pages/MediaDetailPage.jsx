@@ -8,11 +8,12 @@ import {
   LoaderCircle,
   LockKeyhole,
   PlayCircle,
+  Trash2,
   Video,
 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { editPublishedMediaItem, fetchMediaItemDetail, resolveApiUrl } from '../api/index.js'
+import { deletePublishedMediaItem, editPublishedMediaItem, fetchMediaItemDetail, resolveApiUrl } from '../api/index.js'
 import { useAuth } from '../auth/AuthContext.js'
 import MediaMarkdownBlock from '../components/media/MediaMarkdownBlock.jsx'
 import { useLanguage } from '../i18n/LanguageContext.js'
@@ -26,9 +27,15 @@ function formatDuration(seconds, isEnglish) {
   return isEnglish ? `${minutes}m ${remain}s` : `${minutes} 分 ${remain} 秒`
 }
 
-function buildPlayableUrl(item) {
+function buildPlayableUrl(item, accessToken = '') {
   const url = item?.accessible ? item?.media_url || item?.preview_url : item?.preview_url || item?.media_url
-  return resolveApiUrl(url)
+  const resolvedUrl = resolveApiUrl(url)
+  const cleanToken = String(accessToken || '').trim()
+  if (!resolvedUrl || !cleanToken || typeof url !== 'string' || !url.startsWith('/api/media/') || !url.endsWith('/stream')) {
+    return resolvedUrl
+  }
+  const separator = resolvedUrl.includes('?') ? '&' : '?'
+  return `${resolvedUrl}${separator}token=${encodeURIComponent(cleanToken)}`
 }
 
 function buildPreviewLabel(previewSeconds, isEnglish) {
@@ -51,6 +58,7 @@ function MediaDetailPage({ kind = 'audio' }) {
   const [error, setError] = useState('')
   const [editError, setEditError] = useState('')
   const [editingMediaId, setEditingMediaId] = useState(null)
+  const [deletingMediaId, setDeletingMediaId] = useState(null)
   const [selectedChapterSeconds, setSelectedChapterSeconds] = useState(null)
   const [previewEnded, setPreviewEnded] = useState(false)
 
@@ -86,10 +94,12 @@ function MediaDetailPage({ kind = 'audio' }) {
     try {
       node.pause?.()
       node.currentTime = 0
-    } catch {}
+    } catch {
+      // Playback reset can fail for unloaded media; the next load event will restore state.
+    }
   }, [item?.slug])
 
-  const playableUrl = buildPlayableUrl(item)
+  const playableUrl = buildPlayableUrl(item, accessToken)
   const previewLimit = item?.accessible ? 0 : Number(item?.preview_duration_seconds || 0)
   const coverUrl = resolveApiUrl(item?.cover_image_url)
   const chapters = Array.isArray(item?.chapters) ? item.chapters : []
@@ -103,7 +113,9 @@ function MediaDetailPage({ kind = 'audio' }) {
     if (!node) return
     try {
       node.currentTime = safeSeconds
-    } catch {}
+    } catch {
+      // Some browsers reject seeking before metadata is ready.
+    }
   }
 
   const handleLoadedMetadata = () => {
@@ -112,7 +124,9 @@ function MediaDetailPage({ kind = 'audio' }) {
     if (!node) return
     try {
       node.currentTime = Math.max(0, Number(selectedChapterSeconds || 0))
-    } catch {}
+    } catch {
+      // Metadata may still be settling on short preview assets.
+    }
   }
 
   const handleTimeUpdate = (event) => {
@@ -155,6 +169,27 @@ function MediaDetailPage({ kind = 'audio' }) {
       setEditError(nextError?.message || (isEnglish ? 'Failed to open this media item for editing.' : '打开该媒体的重编草稿失败。'))
     } finally {
       setEditingMediaId(null)
+    }
+  }
+
+  const handleDeletePublished = async () => {
+    const mediaItemId = item?.media_item_id || item?.id
+    if (!mediaItemId || deletingMediaId) return
+    const confirmed = window.confirm(
+      isEnglish
+        ? `Delete "${item.title}" from the live ${isAudio ? 'audio' : 'video'} page and move it back to the draft box?`
+        : `确定将《${item.title}》从正式${isAudio ? '音频' : '视频'}页删除并退回草稿箱吗？`,
+    )
+    if (!confirmed) return
+    setEditError('')
+    setDeletingMediaId(mediaItemId)
+    try {
+      const draft = await deletePublishedMediaItem(mediaItemId, accessToken)
+      navigate(`/media-studio?draft_id=${draft.id}&unpublished=1`)
+    } catch (nextError) {
+      setEditError(nextError?.message || (isEnglish ? 'Failed to move this media item back to drafts.' : '将该媒体退回草稿箱失败。'))
+    } finally {
+      setDeletingMediaId(null)
     }
   }
 
@@ -380,15 +415,27 @@ function MediaDetailPage({ kind = 'audio' }) {
             </div>
             <div className="flex flex-wrap gap-3 px-6 py-6">
               {isAdmin ? (
-                <button
-                  type="button"
-                  onClick={handleEditAgain}
-                  disabled={editingMediaId === (item.media_item_id || item.id)}
-                  className="inline-flex items-center gap-2 rounded-full border border-fudan-blue/15 bg-white px-5 py-3 text-sm font-semibold text-fudan-blue transition hover:border-fudan-blue/35 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {editingMediaId === (item.media_item_id || item.id) ? <LoaderCircle size={16} className="animate-spin" /> : <FilePenLine size={16} />}
-                  {isEnglish ? 'Edit again' : '重新编辑'}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={handleEditAgain}
+                    disabled={editingMediaId === (item.media_item_id || item.id) || Boolean(deletingMediaId)}
+                    className="inline-flex items-center gap-2 rounded-full border border-fudan-blue/15 bg-white px-5 py-3 text-sm font-semibold text-fudan-blue transition hover:border-fudan-blue/35 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {editingMediaId === (item.media_item_id || item.id) ? <LoaderCircle size={16} className="animate-spin" /> : <FilePenLine size={16} />}
+                    {isEnglish ? 'Edit again' : '重新编辑'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDeletePublished}
+                    disabled={deletingMediaId === (item.media_item_id || item.id) || Boolean(editingMediaId)}
+                    title={isEnglish ? 'Delete to draft box' : '删除并退回草稿箱'}
+                    className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-5 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {deletingMediaId === (item.media_item_id || item.id) ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                    {isEnglish ? 'Delete to drafts' : '删除退回草稿箱'}
+                  </button>
+                </>
               ) : null}
               {!item.accessible ? (
                 <Link

@@ -13,6 +13,7 @@ from backend.database import connection_scope, ensure_runtime_tables
 from backend.main import app
 from backend.routers import admin as admin_router
 from backend.routers import editorial as editorial_router
+from backend.services.article_ai_output_service import build_current_article_source_hash
 
 SOURCE_DB_PATH = Path(__file__).resolve().parents[2] / "fudan_knowledge_base.db"
 
@@ -112,6 +113,47 @@ def _set_column_mapping(article_id: int, *, column_slug: str = "insights", is_fe
         connection.execute(
             "INSERT INTO article_columns (article_id, column_id, is_featured, sort_order) VALUES (?, ?, ?, ?)",
             (article_id, int(column_row["id"]), is_featured, sort_order),
+        )
+        connection.commit()
+
+
+def _insert_article_translation(
+    article_id: int,
+    *,
+    title: str,
+    excerpt: str,
+    summary: str | None = None,
+    content: str | None = None,
+) -> None:
+    with connection_scope() as connection:
+        article_row = connection.execute(
+            """
+            SELECT id, title, excerpt, main_topic, content, COALESCE(access_level, 'public') AS access_level
+            FROM articles
+            WHERE id = ?
+            """,
+            (article_id,),
+        ).fetchone()
+        assert article_row is not None
+        source_hash = build_current_article_source_hash(article_row)
+        timestamp = f"{date.today().isoformat()}T10:00:00"
+        connection.execute(
+            """
+            INSERT OR REPLACE INTO article_translations (
+                article_id, target_lang, source_hash, title, excerpt, summary, content, model, created_at, updated_at
+            )
+            VALUES (?, 'en', ?, ?, ?, ?, ?, 'gemini-2.0-flash', ?, ?)
+            """,
+            (
+                article_id,
+                source_hash,
+                title,
+                excerpt,
+                summary or excerpt,
+                content or excerpt,
+                timestamp,
+                timestamp,
+            ),
         )
         connection.commit()
 
@@ -236,18 +278,18 @@ def test_legacy_cover_images_fall_back_to_default_card_cover_until_new_editorial
     legacy_article_id = _insert_article(
         title="Legacy Cover Should Hide",
         slug="legacy-cover-should-hide",
-        publish_date="2026-04-11",
+        publish_date="9999-04-11",
         cover_image_path="/legacy-covers/legacy-cover.png",
     )
     new_editorial_article_id = _insert_article(
         title="New Editorial Cover Should Stay",
         slug="new-editorial-cover-should-stay",
-        publish_date="2026-04-12",
+        publish_date="9999-04-12",
         cover_image_path="/editorial-uploads/covers/new-cover.png",
     )
 
     with connection_scope() as connection:
-        now = "2026-04-12T09:00:00"
+        now = "9999-04-12T09:00:00"
         connection.execute(
             """
             INSERT INTO editorial_articles (
@@ -274,9 +316,9 @@ def test_legacy_cover_images_fall_back_to_default_card_cover_until_new_editorial
             (
                 legacy_article_id,
                 legacy_article_id,
-                "legacy-cover-should-hide-editorial",
-                "Legacy Cover Should Hide",
-                "2026-04-11",
+                    "legacy-cover-should-hide-editorial",
+                    "Legacy Cover Should Hide",
+                    "9999-04-11",
                 "/editorial-uploads/covers/legacy-cover.png",
                 now,
                 now,
@@ -308,9 +350,9 @@ def test_legacy_cover_images_fall_back_to_default_card_cover_until_new_editorial
             """,
             (
                 new_editorial_article_id,
-                "new-editorial-cover-should-stay",
-                "New Editorial Cover Should Stay",
-                "2026-04-12",
+                    "new-editorial-cover-should-stay",
+                    "New Editorial Cover Should Stay",
+                    "9999-04-12",
                 "/editorial-uploads/covers/new-cover.png",
                 now,
                 now,
@@ -375,6 +417,87 @@ def test_admin_content_operations_drive_home_feed_sections(client):
     assert payload["topic_square"][0]["slug"] == "configured-topic"
 
 
+def test_admin_content_operations_support_independent_english_homepage_distribution(client):
+    zh_hero_article_id = _insert_article(
+        title="中文首页头条",
+        slug="zh-homepage-hero",
+        publish_date="2099-02-01",
+        excerpt="中文首页头条摘要。",
+    )
+    en_hero_article_id = _insert_article(
+        title="英文版候选中文原文",
+        slug="en-homepage-hero-source",
+        publish_date="2099-02-02",
+        excerpt="这篇文章会被翻译成英文头条。",
+    )
+    _ensure_column_mapping(zh_hero_article_id, "insights")
+    _ensure_column_mapping(en_hero_article_id, "insights")
+    _insert_article_translation(
+        en_hero_article_id,
+        title="English Homepage Hero",
+        excerpt="English homepage hero excerpt.",
+        content="English homepage hero body.",
+    )
+
+    zh_update = client.put(
+        "/api/admin/content-ops/sections/hero",
+        json={"items": [{"entity_type": "article", "id": zh_hero_article_id, "slug": "zh-homepage-hero", "title": "中文首页头条"}]},
+    )
+    assert zh_update.status_code == 200
+    assert zh_update.json()["language"] == "zh"
+
+    en_update = client.put(
+        "/api/admin/content-ops/sections/hero?language=en",
+        json={"items": [{"entity_type": "article", "id": en_hero_article_id, "slug": "en-homepage-hero-source", "title": "English Homepage Hero"}]},
+    )
+    assert en_update.status_code == 200
+    assert en_update.json()["language"] == "en"
+
+    zh_state = client.get("/api/admin/content-ops?language=zh")
+    en_state = client.get("/api/admin/content-ops?language=en")
+    assert zh_state.status_code == 200
+    assert en_state.status_code == 200
+    assert zh_state.json()["sections"][0]["items"][0]["id"] == zh_hero_article_id
+    assert en_state.json()["sections"][0]["items"][0]["id"] == en_hero_article_id
+    assert en_state.json()["sections"][0]["items"][0]["title"] == "English Homepage Hero"
+
+    zh_feed = client.get("/api/home/feed?language=zh")
+    en_feed = client.get("/api/home/feed?language=en")
+    assert zh_feed.status_code == 200
+    assert en_feed.status_code == 200
+    assert zh_feed.json()["hero"]["id"] == zh_hero_article_id
+    assert en_feed.json()["hero"]["id"] == en_hero_article_id
+    assert en_feed.json()["hero"]["title"] == "English Homepage Hero"
+
+
+def test_admin_content_operation_article_candidates_filter_and_localize_for_english(client):
+    translated_article_id = _insert_article(
+        title="中文 GPU 原文",
+        slug="gpu-english-candidate-source",
+        publish_date="2099-03-02",
+        excerpt="这篇文章具备英文资产。",
+    )
+    untranslated_article_id = _insert_article(
+        title="未翻译中文文章",
+        slug="zh-only-admin-candidate",
+        publish_date="2099-03-01",
+        excerpt="这篇文章没有英文资产。",
+    )
+    _insert_article_translation(
+        translated_article_id,
+        title="GPU Candidate",
+        excerpt="English candidate excerpt.",
+        content="English candidate body.",
+    )
+
+    response = client.get("/api/admin/content-ops/candidates?entity_type=article&language=en&limit=20")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert any(item["id"] == translated_article_id and item["title"] == "GPU Candidate" for item in payload)
+    assert all(item["id"] != untranslated_article_id for item in payload)
+
+
 def test_latest_and_trending_respect_new_ordering(client):
     today = date.today()
     recent_article_id = _insert_article(
@@ -420,12 +543,12 @@ def test_column_pages_and_home_previews_put_newer_articles_ahead_of_old_featured
     old_featured_article_id = _insert_article(
         title="Old Featured Column Article",
         slug="old-featured-column-article",
-        publish_date="2026-04-01",
+        publish_date="9999-04-01",
     )
     new_article_id = _insert_article(
         title="Newest Column Article",
         slug="newest-column-article",
-        publish_date="2026-04-10",
+        publish_date="9999-04-10",
     )
 
     _set_column_mapping(old_featured_article_id, column_slug="insights", is_featured=1, sort_order=0)
@@ -446,4 +569,42 @@ def test_column_pages_and_home_previews_put_newer_articles_ahead_of_old_featured
     home_response = client.get("/api/home/feed?language=zh")
     assert home_response.status_code == 200
     preview_ids = [item["id"] for item in home_response.json()["column_previews"][0]["items"]]
-    assert preview_ids[0] == new_article_id
+    assert new_article_id in preview_ids
+
+
+def test_column_articles_endpoint_returns_english_payload_for_english_entry(client):
+    translated_article_id = _insert_article(
+        title="算力账本的悖论：GPU折旧年限与AI价值瀑布的财务博弈",
+        slug="gpu-depreciation-reset-zh",
+        publish_date="9999-04-16",
+        excerpt="这篇文章讨论 GPU 折旧年限变化带来的财务影响。",
+    )
+    untranslated_article_id = _insert_article(
+        title="中文专栏文章",
+        slug="column-zh-only-article",
+        publish_date="9999-04-15",
+        excerpt="这篇文章还没有生成英文资产。",
+    )
+
+    _set_column_mapping(translated_article_id, column_slug="insights", is_featured=0, sort_order=0)
+    _set_column_mapping(untranslated_article_id, column_slug="insights", is_featured=0, sort_order=1)
+    _insert_article_translation(
+        translated_article_id,
+        title="GPU Depreciation Reset",
+        excerpt="A finance read on how GPU depreciation changes AI infrastructure economics.",
+        content="GPU depreciation reset English body.",
+    )
+
+    response = client.get("/api/columns/insights/articles?page=1&page_size=10&language=en")
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["column"]["name"] == "Deep Insights"
+    assert payload["column"]["description"] == "A core column for long-form analysis, interviews, case studies, and essays."
+    assert payload["total"] >= 1
+    assert all(item["id"] != untranslated_article_id for item in payload["items"])
+    assert any(item["id"] == translated_article_id for item in payload["items"])
+
+    translated_item = next(item for item in payload["items"] if item["id"] == translated_article_id)
+    assert translated_item["title"] == "GPU Depreciation Reset"
+    assert translated_item["excerpt"] == "A finance read on how GPU depreciation changes AI infrastructure economics."

@@ -2,19 +2,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import {
-  autoFormatEditorialArticle,
-  autoSummarizeEditorialArticle,
-  autoTranslateEditorialArticle,
   autotagEditorialArticle,
   createEditorialArticle,
   deleteEditorialArticle,
   fetchColumns,
+  fetchEditorialAsyncTask,
   fetchEditorialArticle,
   fetchEditorialArticles,
   fetchEditorialDashboard,
   fetchEditorialTopics,
   publishEditorialArticle,
   resolveApiUrl,
+  startEditorialAutoFormatTask,
+  startEditorialAutoSummaryTask,
+  startEditorialAutoTranslateTask,
   updateEditorialArticle,
   uploadEditorialFile,
 } from '../api/index.js'
@@ -96,6 +97,12 @@ const EMPTY_EDITOR_STATE = {
   text: '',
   dirty: false,
   version: 'empty',
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
 }
 
 function tagKey(tag) {
@@ -264,6 +271,7 @@ function EditorialWorkbenchPage() {
     return Number.isFinite(value) && value > 0 ? value : null
   }, [searchParams])
   const reopenedFromArticle = searchParams.get('reopened') === '1'
+  const unpublishedFromArticle = searchParams.get('unpublished') === '1'
   const hasUnsavedSummaryEdits = Boolean(summaryEditorState?.dirty && String(summaryEditorState?.html || '').trim())
   const hasUnsavedManualEdits = Boolean(editorState?.dirty && String(editorState?.html || '').trim())
   const hasUnsavedEnglishSummaryEdits = Boolean(translationSummaryEditorState?.dirty && String(translationSummaryEditorState?.html || '').trim())
@@ -287,6 +295,7 @@ function EditorialWorkbenchPage() {
     const next = new URLSearchParams(searchParams)
     next.delete('editorial_id')
     next.delete('reopened')
+    next.delete('unpublished')
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
 
@@ -385,6 +394,7 @@ function EditorialWorkbenchPage() {
       version: `en:${detail.id}:${detail.updated_at || ''}:${detail.translation_updated_at || ''}:${seededEnglishHtml.length}`,
     })
   }, [
+    detail,
     detail?.summary_editor_document,
     detail?.summary_html,
     detail?.published_summary_html,
@@ -470,6 +480,34 @@ function EditorialWorkbenchPage() {
       } finally {
         setBusy('')
       }
+    },
+    [isEnglish],
+  )
+
+  const waitForEditorialTask = useCallback(
+    async (task, label) => {
+      const taskId = task?.id
+      if (!taskId) throw new Error(isEnglish ? 'Task was not created.' : '任务创建失败。')
+      const labelText = label || (isEnglish ? 'AI task' : 'AI 任务')
+      setMessage(isEnglish ? `${labelText} queued. Waiting for worker...` : `${labelText}已进入队列，等待 worker 处理。`)
+
+      for (let attempt = 0; attempt < 180; attempt += 1) {
+        await sleep(attempt < 6 ? 1000 : 2000)
+        const current = await fetchEditorialAsyncTask(taskId)
+        if (current.status === 'completed') return current
+        if (current.status === 'failed') {
+          throw new Error(current.error_message || (isEnglish ? `${labelText} failed.` : `${labelText}失败。`))
+        }
+        if (attempt === 0 || attempt % 8 === 0) {
+          setMessage(
+            isEnglish
+              ? `${labelText} ${current.status || 'running'} (${current.progress || 0}%).`
+              : `${labelText}${current.status || '运行中'}（${current.progress || 0}%）。`,
+          )
+        }
+      }
+
+      throw new Error(isEnglish ? `${labelText} timed out.` : `${labelText}超时。`)
     },
     [isEnglish],
   )
@@ -836,6 +874,13 @@ function EditorialWorkbenchPage() {
             : '当前稿件来自线上正文回编。在你再次点击发布前，线上正式文章不会被覆盖。'}
         </div>
       ) : null}
+      {unpublishedFromArticle && requestedEditorialId && detail?.id === requestedEditorialId ? (
+        <div className="mt-6 rounded-[1.1rem] border border-red-200 bg-red-50 px-5 py-4 text-sm leading-7 text-red-700">
+          {isEnglish
+            ? 'The live article has been deleted and moved back to this draft box. It will stay offline until you publish it again.'
+            : '正式文章已删除并退回当前草稿箱。在你再次发布前，线上详情页会保持下线。'}
+        </div>
+      ) : null}
 
       <section className="mt-8 grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="fudan-panel p-6">
@@ -1032,12 +1077,13 @@ function EditorialWorkbenchPage() {
                     const saved = await persist(
                       hasUnsavedManualEdits || hasUnsavedSummaryEdits || hasUnsavedEnglishManualEdits || hasUnsavedEnglishSummaryEdits,
                     )
-                    const article = await autoFormatEditorialArticle(saved.id, {
+                    const task = await startEditorialAutoFormatTask(saved.id, {
                       source_markdown: form.source_markdown,
                       layout_mode: form.layout_mode,
                       formatting_notes: form.formatting_notes,
                     })
-                    await refreshAll(article.id)
+                    await waitForEditorialTask(task, isEnglish ? 'Auto format' : '自动排版')
+                    await refreshAll(saved.id)
                     setMessage(isEnglish ? 'AI layout completed.' : 'AI 自动排版已完成。')
                   })
                 }
@@ -1053,8 +1099,9 @@ function EditorialWorkbenchPage() {
                     const saved = await persist(
                       hasUnsavedManualEdits || hasUnsavedSummaryEdits || hasUnsavedEnglishManualEdits || hasUnsavedEnglishSummaryEdits,
                     )
-                    const article = await autoSummarizeEditorialArticle(saved.id)
-                    await refreshAll(article.id)
+                    const task = await startEditorialAutoSummaryTask(saved.id)
+                    await waitForEditorialTask(task, isEnglish ? 'Auto summary' : '自动摘要')
+                    await refreshAll(saved.id)
                     setMessage(isEnglish ? 'AI summary generated.' : 'AI 摘要已生成。')
                   })
                 }
@@ -1070,8 +1117,9 @@ function EditorialWorkbenchPage() {
                     const saved = await persist(
                       hasUnsavedManualEdits || hasUnsavedSummaryEdits || hasUnsavedEnglishManualEdits || hasUnsavedEnglishSummaryEdits,
                     )
-                    const article = await autoTranslateEditorialArticle(saved.id)
-                    await refreshAll(article.id)
+                    const task = await startEditorialAutoTranslateTask(saved.id)
+                    await waitForEditorialTask(task, isEnglish ? 'English translation' : '英文翻译')
+                    await refreshAll(saved.id)
                     setMessage(isEnglish ? 'English translation generated.' : 'AI 英文翻译已生成。')
                   })
                 }

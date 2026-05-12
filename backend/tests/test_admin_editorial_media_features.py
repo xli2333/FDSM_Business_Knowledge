@@ -128,6 +128,23 @@ def test_media_admin_upload_requires_login():
     assert response.status_code == 401
 
 
+def test_media_admin_upload_rejects_non_admin(monkeypatch):
+    monkeypatch.setattr(
+        media_router,
+        "get_authenticated_user",
+        lambda authorization, debug_user_id=None, debug_user_email=None: {"id": "media-free-test", "email": "free@example.com"},
+    )
+
+    response = client.post(
+        "/api/media/admin/upload",
+        data={"kind": "video", "usage": "media"},
+        files={"file": ("sample.mp4", b"\x00\x00\x00\x18ftypmp42", "video/mp4")},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Admin permission required"
+
+
 def test_admin_can_auto_format_editorial_article(monkeypatch):
     _allow_admin_access(monkeypatch)
     monkeypatch.setattr(
@@ -346,6 +363,20 @@ def test_admin_can_upload_media_files(monkeypatch):
     assert payload["usage"] == "media"
     assert payload["url"].startswith("/media-uploads/audio/media/")
     assert (upload_root / "audio" / "media" / payload["filename"]).exists()
+
+    video_response = client.post(
+        "/api/media/admin/upload",
+        data={"kind": "video", "usage": "media"},
+        files={"file": ("sample-video.mp4", b"\x00\x00\x00\x18ftypmp42", "video/mp4")},
+    )
+    assert video_response.status_code == 200
+    video_payload = video_response.json()
+
+    assert video_payload["kind"] == "video"
+    assert video_payload["usage"] == "media"
+    assert video_payload["item"]["kind"] == "video"
+    assert video_payload["url"].startswith("/media-uploads/video/media/")
+    assert (upload_root / "video" / "media" / video_payload["filename"]).exists()
 
 
 def _prepare_editorial_upload_root(monkeypatch):
@@ -1195,7 +1226,7 @@ def _legacy_test_auto_summary_publishes_and_article_detail_reads_same_summary_ht
         'summarize_article_payload',
         lambda title, content: {
             'summary': '### 核心判断\n\n- **23andMe** 数据泄露暴露了治理缺口。\n- 监管问责与用户信任流失同步发生。',
-            'model': 'gemini-2.5-flash',
+            'model': 'gemini-3.0-flash',
         },
     )
 
@@ -1218,7 +1249,7 @@ def _legacy_test_auto_summary_publishes_and_article_detail_reads_same_summary_ht
     assert summary_response.status_code == 200
     summary_payload = summary_response.json()
 
-    assert summary_payload['summary_model'] == 'gemini-2.5-flash'
+    assert summary_payload['summary_model'] == 'gemini-3.0-flash'
     assert summary_payload['summary_markdown'].startswith('### 核心判断')
     assert 'summary-preview-shell' in summary_payload['summary_html']
     assert '<strong>23andMe</strong>' in summary_payload['summary_html']
@@ -1248,7 +1279,7 @@ def _legacy_test_auto_summary_contract_flattens_brief_style_output_before_publis
         'summarize_article_payload',
         lambda title, content: {
             'summary': '以下是这篇文章的商业知识简报：\n\n### 核心判断\n\n- **23andMe** 数据泄露暴露了治理缺口。\n- 监管问责与用户信任流失同步发生。',
-            'model': 'gemini-2.5-flash',
+            'model': 'gemini-3.0-flash',
         },
     )
 
@@ -1271,7 +1302,7 @@ def _legacy_test_auto_summary_contract_flattens_brief_style_output_before_publis
     assert summary_response.status_code == 200
     summary_payload = summary_response.json()
 
-    assert summary_payload['summary_model'] == 'gemini-2.5-flash'
+    assert summary_payload['summary_model'] == 'gemini-3.0-flash'
     assert '以下是' not in summary_payload['summary_markdown']
     assert '简报' not in summary_payload['summary_markdown']
     assert '###' not in summary_payload['summary_markdown']
@@ -1315,7 +1346,7 @@ def test_auto_summary_contract_generates_hybrid_summary_before_publish(monkeypat
         lambda title, content: {
             'summary_markdown': summary_markdown,
             'summary_html': editorial_service._build_summary_editorial_html(summary_markdown),
-            'summary_model': 'gemini-2.5-flash',
+            'summary_model': 'gemini-3.0-flash',
         },
     )
 
@@ -1338,7 +1369,7 @@ def test_auto_summary_contract_generates_hybrid_summary_before_publish(monkeypat
     assert summary_response.status_code == 200
     summary_payload = summary_response.json()
 
-    assert summary_payload['summary_model'] == 'gemini-2.5-flash'
+    assert summary_payload['summary_model'] == 'gemini-3.0-flash'
     assert '以下是' not in summary_payload['summary_markdown']
     assert 200 <= ai_service.editorial_summary_visible_length(summary_payload['summary_markdown']) <= ai_service.EDITORIAL_SUMMARY_MAX_CHARS
     assert '**' in summary_payload['summary_markdown']
@@ -1513,6 +1544,7 @@ def test_auto_format_keeps_previous_manual_html_as_backup(monkeypatch):
 
 def test_admin_can_delete_unpublished_editorial_draft_but_not_published_one(monkeypatch):
     _allow_admin_access(monkeypatch)
+    monkeypatch.setattr(editorial_service, 'render_fudan_wechat', _mock_renderer('Published Draft'))
 
     create_response = client.post(
         '/api/editorial/articles',
@@ -1548,6 +1580,102 @@ def test_admin_can_delete_unpublished_editorial_draft_but_not_published_one(monk
 
     delete_published = client.delete(f'/api/editorial/articles/{published_id}')
     assert delete_published.status_code == 400
+
+
+def test_published_article_delete_moves_live_article_back_to_draft_then_draft_delete_removes_it(monkeypatch):
+    _allow_admin_access(monkeypatch)
+    monkeypatch.setattr(editorial_service, 'render_fudan_wechat', _mock_renderer('Delete Published Article'))
+
+    create_response = client.post(
+        '/api/editorial/articles',
+        json={
+            'title': 'Delete Published Article',
+            'source_markdown': 'raw content',
+            'content_markdown': '# Delete Published Article\n\nReady body.',
+            'summary_markdown': '这是一篇用于验证正式文章删除退回草稿箱的摘要。',
+            'summary_html': '<div><p>这是一篇用于验证正式文章删除退回草稿箱的摘要。</p></div>',
+            'primary_column_slug': 'insights',
+            'primary_column_manual': True,
+            'tags': [{'name': 'Delete Test', 'slug': 'topic-delete-test', 'category': 'topic', 'confidence': 0.9}],
+            'final_html': '<div><h1>Delete Published Article</h1><p>Ready body.</p></div>',
+        },
+    )
+    assert create_response.status_code == 200
+    editorial_id = create_response.json()['id']
+
+    publish_response = client.post(f'/api/editorial/articles/{editorial_id}/publish')
+    assert publish_response.status_code == 200
+    article_id = publish_response.json()['article_id']
+    assert client.get(f'/api/article/{article_id}').status_code == 200
+
+    with connection_scope() as connection:
+        timestamp = '2026-04-20T00:00:00'
+        connection.execute(
+            """
+            INSERT INTO featured_articles (article_id, position, start_date, end_date, is_active)
+            VALUES (?, 'round173-delete-test', NULL, NULL, 1)
+            """,
+            (article_id,),
+        )
+        connection.execute(
+            """
+            INSERT INTO home_content_slots (
+                language, slot_key, entity_type, entity_id, entity_slug, sort_order, created_at, updated_at
+            )
+            VALUES ('zh', 'editors_picks', 'article', ?, NULL, 0, ?, ?)
+            """,
+            (article_id, timestamp, timestamp),
+        )
+        connection.commit()
+
+    unpublish_response = client.delete(f'/api/editorial/source-articles/{article_id}')
+    assert unpublish_response.status_code == 200
+    draft = unpublish_response.json()
+    assert draft['id'] == editorial_id
+    assert draft['article_id'] is None
+    assert draft['source_article_id'] is None
+    assert draft['status'] == 'draft'
+    assert draft['workflow_status'] == 'draft'
+    assert draft['draft_box_state'] == 'active'
+    assert draft['title'] == 'Delete Published Article'
+    assert draft['content_markdown']
+    assert draft['final_html']
+
+    assert client.get(f'/api/article/{article_id}').status_code == 404
+    active_list = client.get('/api/editorial/articles?draft_box_state=active')
+    assert active_list.status_code == 200
+    assert editorial_id in {item['id'] for item in active_list.json()}
+
+    with connection_scope() as connection:
+        assert connection.execute("SELECT id FROM articles WHERE id = ?", (article_id,)).fetchone() is None
+        for table_name in (
+            'article_tags',
+            'article_columns',
+            'topic_articles',
+            'featured_articles',
+            'article_ai_outputs',
+            'article_translations',
+            'user_saved_articles',
+            'article_reactions',
+            'article_view_events',
+            'user_knowledge_theme_articles',
+            'article_versions',
+            'article_chunks',
+            'article_chunk_embeddings',
+            'ingestion_jobs',
+        ):
+            count = connection.execute(f"SELECT COUNT(*) FROM {table_name} WHERE article_id = ?", (article_id,)).fetchone()[0]
+            assert count == 0, table_name
+        home_slot_count = connection.execute(
+            "SELECT COUNT(*) FROM home_content_slots WHERE entity_type = 'article' AND entity_id = ?",
+            (article_id,),
+        ).fetchone()[0]
+        assert home_slot_count == 0
+
+    delete_draft_response = client.delete(f'/api/editorial/articles/{editorial_id}')
+    assert delete_draft_response.status_code == 200
+    assert delete_draft_response.json()['deleted'] is True
+    assert client.get(f'/api/editorial/articles/{editorial_id}').status_code == 404
 
 
 def test_published_editorial_auto_leaves_draft_box_and_reopen_reuses_existing_editorial(monkeypatch):
@@ -2061,7 +2189,7 @@ def test_media_text_upload_prefers_ai_generated_chapters_when_available(monkeypa
                 {"timestamp_label": "00:00", "title": "问题引入：机器人高毛利意味着什么"},
                 {"timestamp_label": "00:57", "title": "核心悬念：盈利后为何仍急于募资"},
             ],
-            "model": "gemini-2.5-flash",
+            "model": "gemini-3.0-flash",
         },
     )
 
@@ -2252,7 +2380,7 @@ def test_media_update_script_markdown_rebuilds_chapters_without_explicit_chapter
                 {"timestamp_label": "00:42", "title": "案例拆解：进入关键事实"},
                 {"timestamp_label": "01:18", "title": "收束判断：回到发布复盘"},
             ],
-            "model": "gemini-2.5-flash",
+            "model": "gemini-3.0-flash",
         },
     )
     create_response = client.post(
@@ -2295,7 +2423,7 @@ def test_media_save_with_same_script_markdown_keeps_existing_chapters(monkeypatc
                 {"timestamp_label": "00:00", "title": "问题引入：第一次章节"},
                 {"timestamp_label": "00:42", "title": "案例拆解：第二部分"},
             ],
-            "model": "gemini-2.5-flash",
+            "model": "gemini-3.0-flash",
         }
 
     monkeypatch.setattr(ai_service, "generate_media_chapter_outline", fake_generate_chapters)
@@ -2345,14 +2473,14 @@ def test_media_rewrite_chapters_endpoint_refreshes_outline_without_regenerating_
                     {"timestamp_label": "00:00", "title": "问题引入：第一次章节"},
                     {"timestamp_label": "00:42", "title": "案例拆解：第一次第二节"},
                 ],
-                "model": "gemini-2.5-flash",
+                "model": "gemini-3.0-flash",
             },
             {
                 "chapters": [
                     {"timestamp_label": "00:00", "title": "问题引入：重写后的新章节"},
                     {"timestamp_label": "00:42", "title": "案例拆解：重写后的第二节"},
                 ],
-                "model": "gemini-2.5-flash",
+                "model": "gemini-3.0-flash",
             },
         ]
     )
@@ -2395,7 +2523,7 @@ def test_media_rewrite_chapters_fallback_prefers_transcript_over_script(monkeypa
     monkeypatch.setattr(
         ai_service,
         "generate_media_chapter_outline",
-        lambda **kwargs: {"chapters": [], "model": "gemini-2.5-flash"},
+        lambda **kwargs: {"chapters": [], "model": "gemini-3.0-flash"},
     )
 
     create_response = client.post(
@@ -2615,7 +2743,7 @@ def test_public_media_detail_route_returns_summary_body_and_chapters(monkeypatch
     assert response.status_code == 200
     payload = response.json()
 
-    assert payload["slug"] == "detail-video-program"
+    assert payload["slug"] == published["slug"]
     assert payload["kind"] == "video"
     assert payload["accessible"] is True
     assert payload["media_url"] == published["media_url"]
@@ -2651,11 +2779,105 @@ def test_paid_media_detail_route_keeps_preview_and_gate_copy_for_guest(monkeypat
     assert payload["visibility"] == "paid"
     assert payload["accessible"] is False
     assert payload["media_url"] is None
-    assert payload["preview_url"] == published["media_url"]
+    assert payload["preview_url"] is None
     assert payload["preview_duration_seconds"] == 60
     assert payload["gate_copy"]
     assert payload["body_markdown"].startswith("## 节目简介")
     assert len(payload["chapters"]) == 2
+
+
+def test_media_published_delete_moves_item_back_to_draft_then_draft_delete_removes_it(monkeypatch):
+    for kind, label in (("video", "视频"), ("audio", "音频")):
+        published = _create_and_publish_media_item(
+            monkeypatch,
+            kind=kind,
+            slug=f"delete-published-{kind}",
+            title=f"删除退回草稿箱{label}样本",
+            visibility="public",
+        )
+
+        unpublish_response = client.delete(f"/api/media/admin/published-items/{published['media_item_id']}")
+        assert unpublish_response.status_code == 200
+        draft = unpublish_response.json()
+
+        assert draft["media_item_id"] == published["media_item_id"]
+        assert draft["status"] == "draft"
+        assert draft["workflow_status"] == "draft"
+        assert draft["draft_box_state"] == "active"
+        assert draft["is_reopened_from_published"] is False
+        assert draft["title"] == f"删除退回草稿箱{label}样本"
+
+        public_detail_response = client.get(f"/api/media/{kind}/{published['slug']}")
+        assert public_detail_response.status_code == 404
+
+        admin_draft_list = client.get(f"/api/media/admin/items?kind={kind}&limit=40")
+        assert admin_draft_list.status_code == 200
+        assert draft["id"] in {item["id"] for item in admin_draft_list.json()["items"]}
+
+        with connection_scope() as connection:
+            media_row = connection.execute("SELECT status FROM media_items WHERE id = ?", (published["media_item_id"],)).fetchone()
+        assert media_row is not None
+        assert media_row["status"] == "draft"
+
+        delete_draft_response = client.delete(f"/api/media/admin/items/{draft['id']}")
+        assert delete_draft_response.status_code == 200
+        assert delete_draft_response.json()["deleted"] is True
+
+        with connection_scope() as connection:
+            media_row_after_delete = connection.execute("SELECT id FROM media_items WHERE id = ?", (published["media_item_id"],)).fetchone()
+        assert media_row_after_delete is None
+
+
+def test_local_seed_audio_delete_is_not_republished_by_sync(monkeypatch):
+    _allow_admin_access(monkeypatch)
+    source_seed = next(iter(media_service.LOCAL_AUDIO_ITEMS))
+    audio_directory = Path(__file__).resolve().parents[2] / "audio"
+    assert (audio_directory / source_seed["file_name"]).exists()
+    seed = {
+        **source_seed,
+        "slug": "round172-local-audio-delete-seed",
+        "title": "Round172 本地音频删除样本",
+    }
+    monkeypatch.setattr(media_service, "LOCAL_AUDIO_ITEMS", [seed])
+
+    with connection_scope() as connection:
+        connection.execute("DELETE FROM media_seed_tombstones WHERE kind = 'audio' AND slug = ?", (seed["slug"],))
+        connection.execute("DELETE FROM media_drafts WHERE slug = ?", (seed["slug"],))
+        connection.execute("DELETE FROM media_items WHERE slug = ?", (seed["slug"],))
+        connection.commit()
+
+    media_service.sync_local_audio_library()
+    with connection_scope() as connection:
+        media_row = connection.execute("SELECT id, status FROM media_items WHERE slug = ?", (seed["slug"],)).fetchone()
+    assert media_row is not None
+    assert media_row["status"] == "published"
+
+    unpublish_response = client.delete(f"/api/media/admin/published-items/{media_row['id']}")
+    assert unpublish_response.status_code == 200
+    draft = unpublish_response.json()
+    assert draft["draft_box_state"] == "active"
+
+    media_service.sync_local_audio_library()
+    with connection_scope() as connection:
+        unpublished_row = connection.execute("SELECT id, status FROM media_items WHERE slug = ?", (seed["slug"],)).fetchone()
+    assert unpublished_row is not None
+    assert unpublished_row["status"] == "draft"
+
+    public_detail_response = client.get(f"/api/media/audio/{seed['slug']}")
+    assert public_detail_response.status_code == 404
+
+    delete_draft_response = client.delete(f"/api/media/admin/items/{draft['id']}")
+    assert delete_draft_response.status_code == 200
+    media_service.sync_local_audio_library()
+
+    with connection_scope() as connection:
+        deleted_row = connection.execute("SELECT id FROM media_items WHERE slug = ?", (seed["slug"],)).fetchone()
+        tombstone_row = connection.execute(
+            "SELECT deleted_at FROM media_seed_tombstones WHERE kind = 'audio' AND slug = ?",
+            (seed["slug"],),
+        ).fetchone()
+    assert deleted_row is None
+    assert tombstone_row is not None
 
 
 def test_media_edit_published_item_reuses_existing_draft(monkeypatch):

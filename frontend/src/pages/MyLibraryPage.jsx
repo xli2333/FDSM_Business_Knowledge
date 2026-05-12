@@ -2,7 +2,8 @@ import { BookOpen, Bookmark, Eye, Heart, Lock, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext.js'
-import { fetchMyDashboard, fetchMyLibrary } from '../api/index.js'
+import { fetchMyDashboard, fetchMyLibrary, fetchTodayBookmark } from '../api/index.js'
+import TodayBookmarkPreviewCard from '../components/bookmark/TodayBookmarkPreviewCard.jsx'
 import ArticleCard from '../components/shared/ArticleCard.jsx'
 import { useLanguage } from '../i18n/LanguageContext.js'
 import { getRoleExperience, resolveRoleTier } from '../lib/roleExperience.js'
@@ -103,6 +104,7 @@ function MyLibraryPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [data, setData] = useState({ bookmarks: [], likes: [], recent_views: [] })
   const [dashboard, setDashboard] = useState(null)
+  const [todayBookmark, setTodayBookmark] = useState(null)
   const [error, setError] = useState('')
 
   const roleTier = resolveRoleTier({ membership, isAuthenticated })
@@ -115,10 +117,15 @@ function MyLibraryPage() {
       fetchMyDashboard(accessToken).then(setDashboard).catch(() => {})
       return
     }
-    Promise.all([fetchMyDashboard(accessToken), fetchMyLibrary(accessToken, 18)])
-      .then(([dashboardPayload, libraryPayload]) => {
+    Promise.all([
+      fetchMyDashboard(accessToken),
+      fetchMyLibrary(accessToken, 18),
+      fetchTodayBookmark(accessToken, { language: isEnglish ? 'en' : 'zh' }).catch(() => null),
+    ])
+      .then(([dashboardPayload, libraryPayload, bookmarkPayload]) => {
         setDashboard(dashboardPayload)
         setData(libraryPayload)
+        setTodayBookmark(bookmarkPayload)
       })
       .catch(() => setError(isEnglish ? 'Failed to load your library.' : '个人资料库加载失败。'))
   }, [accessToken, isAuthenticated, isEnglish])
@@ -345,6 +352,8 @@ function MyLibraryPage() {
       </section>
 
       <div className="mt-10 space-y-12">
+        <TodayBookmarkPreviewCard bookmark={todayBookmark} isEnglish={isEnglish} />
+
         <KnowledgeWorkspaceCard canUseAiAssistant={canUseAiAssistant} dashboard={dashboard} isEnglish={isEnglish} />
 
         <section className="fudan-panel p-6 md:p-8">

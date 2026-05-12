@@ -4,7 +4,7 @@ from fastapi import APIRouter, Header
 
 from backend.models.schemas import FollowListResponse, FollowRequest, FollowToggleResponse, WatchlistResponse
 from backend.services.follow_service import get_watchlist, list_follows, toggle_follow
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 
 router = APIRouter(prefix="/api/follows", tags=["follows"])
 

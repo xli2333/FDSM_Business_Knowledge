@@ -3,13 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import time
 from collections import defaultdict
+from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from threading import Lock
 
 from fastapi import HTTPException
 
-from backend.config import BUSINESS_DATA_DIR, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from backend.config import BUSINESS_DATA_DIR, DEFAULT_PAGE_SIZE, HOME_FEED_CACHE_TTL_SECONDS, MAX_PAGE_SIZE
 from backend.database import connection_scope
 from backend.services import ai_service
 from backend.services.article_ai_output_service import (
@@ -40,6 +43,13 @@ from backend.services.fudan_wechat_renderer import is_fudan_wechat_preview_html
 from backend.services.membership_service import build_content_access
 from backend.services.summary_preview_service import is_summary_preview_html, render_summary_preview_html
 from backend.services.article_visibility_service import is_hidden_low_value_article
+
+_HOME_FEED_CACHE_LOCK = Lock()
+_HOME_FEED_CACHE: dict[str, tuple[float, dict]] = {}
+
+
+def _normalize_home_feed_language(language: str) -> str:
+    return "en" if str(language or "").strip().lower() == "en" else "zh"
 
 
 def _organization_slug(name: str) -> str:
@@ -445,54 +455,61 @@ def _query_trending_rows(connection, *, window: str, limit: int, offset: int = 0
     parts = get_trending_sql_parts(window)
     return connection.execute(
         """
+        WITH view_scores AS (
+            SELECT article_id, COUNT(*) AS total
+            FROM article_view_events
+            WHERE view_date >= ?
+            GROUP BY article_id
+        ),
+        like_scores AS (
+            SELECT article_id, COUNT(*) AS total
+            FROM article_reactions
+            WHERE reaction_type = 'like'
+              AND is_active = 1
+              AND updated_at >= ?
+            GROUP BY article_id
+        ),
+        bookmark_scores AS (
+            SELECT article_id, COUNT(*) AS total
+            FROM article_reactions
+            WHERE reaction_type = 'bookmark'
+              AND is_active = 1
+              AND updated_at >= ?
+            GROUP BY article_id
+        )
         SELECT
-            id, title, slug, publish_date, source, excerpt, article_type,
-            main_topic, view_count, cover_image_path, link
+            articles.id,
+            articles.title,
+            articles.slug,
+            articles.publish_date,
+            articles.source,
+            articles.excerpt,
+            articles.article_type,
+            articles.main_topic,
+            articles.view_count,
+            articles.cover_image_path,
+            articles.link,
+            (
+                ? * COALESCE(view_scores.total, 0)
+                + ? * COALESCE(like_scores.total, 0)
+                + ? * COALESCE(bookmark_scores.total, 0)
+            ) AS score
         FROM articles
-        ORDER BY (
-            ? * COALESCE(
-                (
-                    SELECT COUNT(*)
-                    FROM article_view_events ave
-                    WHERE ave.article_id = articles.id
-                      AND ave.view_date >= ?
-                ),
-                0
-            )
-            + ? * COALESCE(
-                (
-                    SELECT COUNT(*)
-                    FROM article_reactions ar
-                    WHERE ar.article_id = articles.id
-                      AND ar.reaction_type = 'like'
-                      AND ar.is_active = 1
-                      AND date(COALESCE(ar.updated_at, ar.created_at)) >= date(?)
-                ),
-                0
-            )
-            + ? * COALESCE(
-                (
-                    SELECT COUNT(*)
-                    FROM article_reactions ar
-                    WHERE ar.article_id = articles.id
-                      AND ar.reaction_type = 'bookmark'
-                      AND ar.is_active = 1
-                      AND date(COALESCE(ar.updated_at, ar.created_at)) >= date(?)
-                ),
-                0
-            )
-        ) DESC,
+        LEFT JOIN view_scores ON view_scores.article_id = articles.id
+        LEFT JOIN like_scores ON like_scores.article_id = articles.id
+        LEFT JOIN bookmark_scores ON bookmark_scores.article_id = articles.id
+        ORDER BY score DESC,
         publish_date DESC,
-        id DESC
+        articles.id DESC
         LIMIT ? OFFSET ?
         """,
         (
+            parts["since_date"],
+            parts["since_date"],
+            parts["since_date"],
             parts["view_weight"],
-            parts["since_date"],
             parts["like_weight"],
-            parts["since_date"],
             parts["bookmark_weight"],
-            parts["since_date"],
             limit,
             offset,
         ),
@@ -717,7 +734,8 @@ def get_article_cover_path(article_id: int) -> Path:
     return cover_path
 
 
-def list_columns() -> list[dict]:
+def list_columns(language: str = "zh") -> list[dict]:
+    normalized_language = "en" if str(language or "").strip().lower() == "en" else "zh"
     with connection_scope() as connection:
         rows = connection.execute(
             """
@@ -730,10 +748,16 @@ def list_columns() -> list[dict]:
             ORDER BY c.sort_order ASC, c.name ASC
             """
         ).fetchall()
-        return [dict(row) for row in rows]
+        return [localize_column_payload(dict(row), language=normalized_language) for row in rows]
 
 
-def get_column_articles(slug: str, page: int = 1, page_size: int = DEFAULT_PAGE_SIZE) -> dict:
+def get_column_articles(
+    slug: str,
+    page: int = 1,
+    page_size: int = DEFAULT_PAGE_SIZE,
+    language: str = "zh",
+) -> dict:
+    normalized_language = "en" if str(language or "").strip().lower() == "en" else "zh"
     safe_page = max(page, 1)
     safe_page_size = max(1, min(page_size, MAX_PAGE_SIZE))
     offset = (safe_page - 1) * safe_page_size
@@ -748,34 +772,55 @@ def get_column_articles(slug: str, page: int = 1, page_size: int = DEFAULT_PAGE_
         ).fetchone()
         if column is None:
             raise HTTPException(status_code=404, detail="Column not found")
-        total = connection.execute(
-            "SELECT COUNT(*) FROM article_columns WHERE column_id = ?",
-            (column["id"],),
-        ).fetchone()[0]
-        rows = connection.execute(
-            """
-            SELECT
-                a.id, a.title, a.slug, a.publish_date, a.source, a.excerpt, a.article_type,
-                a.main_topic, a.view_count, a.cover_image_path, a.link
-            FROM article_columns ac
-            JOIN articles a ON a.id = ac.article_id
-            WHERE ac.column_id = ?
-            ORDER BY a.publish_date DESC, a.id DESC
-            LIMIT ? OFFSET ?
-            """,
-            (column["id"], safe_page_size, offset),
-        ).fetchall()
-        items = _serialize_articles(connection, rows)
+        if normalized_language == "en":
+            rows = connection.execute(
+                """
+                SELECT
+                    a.id, a.title, a.slug, a.publish_date, a.source, a.excerpt, a.article_type,
+                    a.main_topic, a.view_count, a.cover_image_path, a.link
+                FROM article_columns ac
+                JOIN articles a ON a.id = ac.article_id
+                WHERE ac.column_id = ?
+                ORDER BY a.publish_date DESC, a.id DESC
+                """,
+                (column["id"],),
+            ).fetchall()
+            serialized_items = _serialize_articles(connection, rows, language=normalized_language)
+            language_ready_items = [item for item in serialized_items if english_article_ready(item)]
+            total = len(language_ready_items)
+            items = language_ready_items[offset : offset + safe_page_size]
+        else:
+            total = connection.execute(
+                "SELECT COUNT(*) FROM article_columns WHERE column_id = ?",
+                (column["id"],),
+            ).fetchone()[0]
+            rows = connection.execute(
+                """
+                SELECT
+                    a.id, a.title, a.slug, a.publish_date, a.source, a.excerpt, a.article_type,
+                    a.main_topic, a.view_count, a.cover_image_path, a.link
+                FROM article_columns ac
+                JOIN articles a ON a.id = ac.article_id
+                WHERE ac.column_id = ?
+                ORDER BY a.publish_date DESC, a.id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (column["id"], safe_page_size, offset),
+            ).fetchall()
+            items = _serialize_articles(connection, rows, language=normalized_language)
     return {
-        "column": {
-            "id": column["id"],
-            "name": column["name"],
-            "slug": column["slug"],
-            "description": column["description"],
-            "icon": column["icon"],
-            "accent_color": column["accent_color"],
-            "article_count": total,
-        },
+        "column": localize_column_payload(
+            {
+                "id": column["id"],
+                "name": column["name"],
+                "slug": column["slug"],
+                "description": column["description"],
+                "icon": column["icon"],
+                "accent_color": column["accent_color"],
+                "article_count": total,
+            },
+            language=normalized_language,
+        ),
         "total": total,
         "page": safe_page,
         "page_size": safe_page_size,
@@ -1179,7 +1224,26 @@ def get_topic_insights(topic_id: int) -> dict:
 
 
 def get_home_feed(language: str = "zh") -> dict:
-    home_slots = list_home_content_slots()
+    normalized_language = _normalize_home_feed_language(language)
+    if HOME_FEED_CACHE_TTL_SECONDS <= 0:
+        return _build_home_feed(language=normalized_language)
+
+    now = time.monotonic()
+    with _HOME_FEED_CACHE_LOCK:
+        cached = _HOME_FEED_CACHE.get(normalized_language)
+        if cached and cached[0] > now:
+            return deepcopy(cached[1])
+
+        payload = _build_home_feed(language=normalized_language)
+        _HOME_FEED_CACHE[normalized_language] = (
+            time.monotonic() + HOME_FEED_CACHE_TTL_SECONDS,
+            deepcopy(payload),
+        )
+        return payload
+
+
+def _build_home_feed(language: str = "zh") -> dict:
+    home_slots = list_home_content_slots(language=language)
     trending_config = get_trending_config()
     trending_window = str(trending_config["default_window"])
 

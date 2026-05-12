@@ -191,6 +191,81 @@ def expand_query(query: str) -> list[str]:
         return []
 
 
+def generate_daily_bookmark_theme(
+    *,
+    language: str,
+    candidate_topics: list[str],
+    candidate_tags: list[str],
+    article_titles: list[str],
+    article_excerpts: list[str],
+) -> dict[str, str]:
+    flash_llm = get_flash_llm()
+    normalized_language = "en" if language == "en" else "zh"
+    if flash_llm is None:
+        raise RuntimeError("Gemini Flash is not configured.")
+
+    topic_lines = "\n".join(f"- {item}" for item in candidate_topics[:8]) or "- None"
+    tag_lines = "\n".join(f"- {item}" for item in candidate_tags[:10]) or "- None"
+    title_lines = "\n".join(f"- {item}" for item in article_titles[:10]) or "- None"
+    excerpt_lines = "\n".join(f"- {item}" for item in article_excerpts[:8]) or "- None"
+
+    if normalized_language == "zh":
+        prompt = (
+            "你在为一个知识库产品生成“今日书签”的唯一主题名。\n"
+            "请根据用户今天阅读的文章标题、摘要、主题和标签，只归并出一个最主要的主题。\n"
+            "这个主题必须适合放在书签中心做超大字体展示。\n"
+            "硬性规则：\n"
+            "1. 只能输出 1 个主题。\n"
+            "2. 主题必须是中文，不能超过 4 个字。\n"
+            "3. 优先合并近义项，不要并列两个主题，不要用标点。\n"
+            "4. 避免空泛词，例如“商业”“管理”“观察”“前沿”。\n"
+            "5. 如果当天阅读高度集中在 AI、大模型、算力等方向，允许归并成更强的上位词。\n"
+            "返回严格 JSON：\n"
+            "{{\n"
+            '  "theme": "不超过4个字的主题",\n'
+            '  "reason": "一句中文解释，说明为什么这个主题最能概括当天阅读"\n'
+            "}}\n\n"
+            f"候选主主题：\n{topic_lines}\n\n"
+            f"候选标签：\n{tag_lines}\n\n"
+            f"文章标题：\n{title_lines}\n\n"
+            f"文章摘要片段：\n{excerpt_lines}\n\nJSON:"
+        )
+    else:
+        prompt = (
+            "You are naming a single visual theme for a user's daily reading bookmark.\n"
+            "Use the titles, excerpts, topics, and tags below to merge them into one strongest theme.\n"
+            "Hard rules:\n"
+            "1. Return exactly one theme.\n"
+            "2. Keep it within 1 to 4 words.\n"
+            "3. Merge overlapping ideas instead of listing two themes.\n"
+            "4. Avoid generic labels such as Business, Research, or Insight.\n"
+            "Return strict JSON only:\n"
+            "{{\n"
+            '  "theme": "single short theme",\n'
+            '  "reason": "one-sentence explanation"\n'
+            "}}\n\n"
+            f"Candidate topics:\n{topic_lines}\n\n"
+            f"Candidate tags:\n{tag_lines}\n\n"
+            f"Article titles:\n{title_lines}\n\n"
+            f"Excerpt snippets:\n{excerpt_lines}\n\nJSON:"
+        )
+
+    raw = _invoke_prompt(prompt, {}, llm=flash_llm)
+    payload = _parse_json_payload(raw)
+    if not isinstance(payload, dict):
+        raise RuntimeError("Gemini Flash returned an invalid daily bookmark theme payload.")
+
+    theme = str(payload.get("theme") or "").strip()
+    reason = str(payload.get("reason") or "").strip()
+    if not theme:
+        raise RuntimeError("Gemini Flash returned an empty daily bookmark theme.")
+    return {
+        "theme": theme,
+        "reason": reason,
+        "model": GEMINI_FLASH_MODEL,
+    }
+
+
 EDITORIAL_SUMMARY_MIN_CHARS = 200
 EDITORIAL_SUMMARY_MAX_CHARS = 800
 EDITORIAL_SUMMARY_MIN_BULLETS = 3

@@ -148,6 +148,226 @@
     text-decoration: underline;
   }
 
+  .today-bookmark-shell {
+    display: inline-flex;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .today-bookmark-canvas {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(13, 7, 131, 0.05);
+    border-radius: 0.7rem;
+    background: linear-gradient(180deg, #fffdf9 0%, #ffffff 100%);
+    box-shadow: 0 18px 46px rgba(15, 23, 42, 0.1);
+  }
+
+  .today-bookmark-noise {
+    position: absolute;
+    inset: 0;
+    background-image:
+      radial-gradient(circle at 10% 12%, rgba(13, 7, 131, 0.018) 0, transparent 22%),
+      radial-gradient(circle at 86% 82%, rgba(234, 107, 0, 0.03) 0, transparent 24%),
+      radial-gradient(circle at 44% 48%, rgba(15, 23, 42, 0.016) 0, transparent 46%);
+    pointer-events: none;
+  }
+
+  .today-bookmark-header {
+    position: absolute;
+    top: 40px;
+    left: 28px;
+    right: 28px;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 0.18rem;
+    z-index: 3;
+  }
+
+  .today-bookmark-date {
+    color: rgba(13, 7, 131, 0.78);
+    font-family: "Songti SC", "STSong", var(--font-serif);
+    font-size: 1.62rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+  }
+
+  .today-bookmark-heading-label {
+    color: var(--color-fudan-blue);
+    font-family: "Songti SC", "STSong", var(--font-serif);
+    font-size: 3.05rem;
+    font-weight: 900;
+    line-height: 0.96;
+    letter-spacing: -0.07em;
+  }
+
+  .today-bookmark-heading-text {
+    color: var(--color-fudan-blue);
+    font-family: "Songti SC", "STSong", var(--font-serif);
+    font-size: 4.95rem;
+    font-weight: 900;
+    line-height: 0.88;
+    letter-spacing: -0.095em;
+    text-wrap: balance;
+    max-width: 16ch;
+  }
+
+  .today-bookmark-theme-overlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 452px;
+    z-index: 3;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+  }
+
+  .today-bookmark-theme-word {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .today-bookmark-theme-shadow,
+  .today-bookmark-theme-main {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+
+  .today-bookmark-theme-shadow {
+    position: absolute;
+    transform: translate(8px, 12px);
+    opacity: 0.26;
+  }
+
+  .today-bookmark-theme-row {
+    font-family: "Songti SC", "STSong", var(--font-serif);
+    font-size: 17rem;
+    font-weight: 900;
+    line-height: 0.78;
+    letter-spacing: -0.14em;
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .today-bookmark-theme-main .today-bookmark-theme-row {
+    color: rgba(255, 255, 255, 0.985);
+    -webkit-text-stroke: 0.8px rgba(13, 7, 131, 0.1);
+    text-shadow: 0 8px 18px rgba(15, 23, 42, 0.06);
+  }
+
+  .today-bookmark-theme-shadow .today-bookmark-theme-row {
+    color: rgba(234, 107, 0, 0.14);
+  }
+
+  .today-bookmark-theme-word.is-multi .today-bookmark-theme-row {
+    font-size: 10.8rem;
+    line-height: 0.8;
+    letter-spacing: -0.12em;
+  }
+
+  .today-bookmark-theme-word.is-single .today-bookmark-theme-row {
+    font-size: 18rem;
+  }
+
+  .today-bookmark-theme-word.is-latin .today-bookmark-theme-row {
+    font-family: "Baskerville", "Iowan Old Style", "Times New Roman", serif;
+    letter-spacing: -0.02em;
+  }
+
+  .today-bookmark-theme-word.is-latin.is-single .today-bookmark-theme-row {
+    font-size: 18.2rem;
+  }
+
+  .today-bookmark-flow-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+  }
+
+  .today-bookmark-token {
+    position: absolute;
+    white-space: nowrap;
+    line-height: 0.9;
+    transform-origin: left center;
+    letter-spacing: -0.08em;
+    font-family: "Songti SC", "STSong", var(--font-serif);
+    text-rendering: geometricPrecision;
+  }
+
+  .today-bookmark-token.is-blue {
+    color: rgba(13, 7, 131, 0.93);
+  }
+
+  .today-bookmark-token.is-orange {
+    color: rgba(234, 107, 0, 0.96);
+  }
+
+  .today-bookmark-token.is-slate {
+    color: rgba(15, 23, 42, 0.56);
+  }
+
+  .today-bookmark-token.is-vertical {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+
+  .today-bookmark-footer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 38px;
+    display: flex;
+    justify-content: center;
+    z-index: 3;
+  }
+
+  .today-bookmark-qr-shell {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.9rem;
+  }
+
+  .today-bookmark-qr-grid {
+    display: grid;
+    grid-template-columns: repeat(21, 4px);
+    grid-template-rows: repeat(21, 4px);
+    gap: 1px;
+    padding: 14px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 0.7rem;
+    background: #fff;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+  }
+
+  .today-bookmark-qr-cell {
+    width: 4px;
+    height: 4px;
+    border-radius: 1px;
+    background: transparent;
+  }
+
+  .today-bookmark-qr-cell.is-filled {
+    background: rgba(15, 23, 42, 0.92);
+  }
+
+  .today-bookmark-qr-label {
+    color: rgba(15, 23, 42, 0.56);
+    font-family: "Songti SC", "STSong", var(--font-serif);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+  }
+
   .paper-divider {
     @apply border-t border-dashed border-slate-300/70;
   }

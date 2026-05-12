@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, HTTPException, status
 
 from backend.models.schemas import AuthLoginResponse, AuthPasswordLoginRequest, AuthStatusResponse
+from backend.services.auth_service import get_auth_status_payload
 from backend.services.membership_service import get_membership_profile
-from backend.services.supabase_auth_service import get_auth_status_payload
 from backend.services.user_profile_service import authenticate_preview_account, get_business_profile, role_home_path_for_tier
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])

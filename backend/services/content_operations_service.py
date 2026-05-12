@@ -6,6 +6,13 @@ from datetime import date, datetime, timedelta
 from fastapi import HTTPException
 
 from backend.database import connection_scope
+from backend.services.article_ai_output_service import build_current_article_source_hash
+from backend.services.content_localization import (
+    english_article_ready,
+    localize_column_payload,
+    localize_tag_payload,
+    localize_topic_payload,
+)
 
 HOME_SLOT_DEFINITIONS: dict[str, dict[str, object]] = {
     "hero": {"entity_type": "article", "max_items": 1},
@@ -22,6 +29,7 @@ DEFAULT_TRENDING_CONFIG = {
     "like_weight": 4.0,
     "bookmark_weight": 6.0,
 }
+SUPPORTED_CONTENT_LANGUAGES = ("zh", "en")
 
 
 def _now_iso() -> str:
@@ -54,6 +62,11 @@ def _normalize_limit(limit: int, max_limit: int = 24) -> int:
     return max(1, min(int(limit or 12), max_limit))
 
 
+def _normalize_content_language(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    return "en" if normalized == "en" else "zh"
+
+
 def _load_json_object(raw: str | None) -> dict:
     if not raw:
         return {}
@@ -64,63 +77,155 @@ def _load_json_object(raw: str | None) -> dict:
     return payload if isinstance(payload, dict) else {}
 
 
-def _serialize_article_candidate(row) -> dict:
-    return {
+def _matches_candidate_query(candidate: dict, query: str) -> bool:
+    normalized_query = str(query or "").strip().lower()
+    if not normalized_query:
+        return True
+    haystack = " ".join(
+        [
+            str(candidate.get("title") or ""),
+            str(candidate.get("slug") or ""),
+            str(candidate.get("subtitle") or ""),
+            str(candidate.get("description") or ""),
+        ]
+    ).lower()
+    return normalized_query in haystack
+
+
+def _fetch_article_translation_map(connection, article_rows: list) -> dict[int, dict[str, str]]:
+    article_ids = [int(row["id"]) for row in article_rows if row["id"] is not None]
+    if not article_ids:
+        return {}
+
+    current_hashes = {int(row["id"]): build_current_article_source_hash(row) for row in article_rows}
+    placeholders = ",".join("?" for _ in article_ids)
+    translation_rows = connection.execute(
+        f"""
+        SELECT article_id, source_hash, title, excerpt, updated_at, created_at
+        FROM article_translations
+        WHERE article_id IN ({placeholders}) AND target_lang = 'en'
+        ORDER BY article_id ASC, updated_at DESC, created_at DESC
+        """,
+        article_ids,
+    ).fetchall()
+
+    translation_map: dict[int, dict[str, str]] = {}
+    for row in translation_rows:
+        article_id = int(row["article_id"])
+        if article_id in translation_map:
+            continue
+        if str(row["source_hash"] or "") != str(current_hashes.get(article_id) or ""):
+            continue
+        translation_map[article_id] = {
+            "title": str(row["title"] or "").strip(),
+            "excerpt": str(row["excerpt"] or "").strip(),
+        }
+
+    missing_ids = [article_id for article_id in article_ids if article_id not in translation_map]
+    if not missing_ids:
+        return translation_map
+
+    fallback_placeholders = ",".join("?" for _ in missing_ids)
+    ai_rows = connection.execute(
+        f"""
+        SELECT article_id, source_hash, translation_title_en, translation_excerpt_en, updated_at
+        FROM article_ai_outputs
+        WHERE article_id IN ({fallback_placeholders})
+          AND translation_status = 'completed'
+          AND COALESCE(translation_content_en, '') != ''
+        ORDER BY article_id ASC, updated_at DESC
+        """,
+        missing_ids,
+    ).fetchall()
+    for row in ai_rows:
+        article_id = int(row["article_id"])
+        if article_id in translation_map:
+            continue
+        if str(row["source_hash"] or "") != str(current_hashes.get(article_id) or ""):
+            continue
+        translation_map[article_id] = {
+            "title": str(row["translation_title_en"] or "").strip(),
+            "excerpt": str(row["translation_excerpt_en"] or "").strip(),
+        }
+    return translation_map
+
+
+def _serialize_article_candidate(row, *, language: str, translation_map: dict[int, dict[str, str]] | None = None) -> dict | None:
+    translation = (translation_map or {}).get(int(row["id"]))
+    title = str(row["title"] or "").strip()
+    description = str(row["excerpt"] or "").strip()
+    if language == "en":
+        if not translation:
+            return None
+        title = str(translation.get("title") or "").strip() or title
+        description = str(translation.get("excerpt") or "").strip() or description
+    payload = {
         "entity_type": "article",
         "id": row["id"],
         "slug": row["slug"],
-        "title": row["title"],
+        "title": title,
         "subtitle": row["publish_date"],
-        "description": row["excerpt"] or "",
+        "description": description,
     }
+    if language == "en" and not english_article_ready(payload):
+        return None
+    return payload
 
 
-def _serialize_topic_candidate(row) -> dict:
+def _serialize_topic_candidate(row, *, language: str) -> dict:
+    payload = localize_topic_payload(dict(row), language=language)
     return {
         "entity_type": "topic",
-        "id": row["id"],
-        "slug": row["slug"],
-        "title": row["title"],
-        "subtitle": row["type"],
-        "description": row["description"] or "",
+        "id": payload["id"],
+        "slug": payload["slug"],
+        "title": payload["title"],
+        "subtitle": payload["type"],
+        "description": payload.get("description") or "",
     }
 
 
-def _serialize_tag_candidate(row) -> dict:
+def _serialize_tag_candidate(row, *, language: str) -> dict | None:
+    payload = localize_tag_payload(dict(row), language=language)
+    if payload is None:
+        return None
     return {
         "entity_type": "tag",
-        "id": row["id"],
-        "slug": row["slug"],
-        "title": row["name"],
-        "subtitle": row["category"],
-        "description": f'{row["article_count"] or 0} articles',
+        "id": payload["id"],
+        "slug": payload["slug"],
+        "title": payload["name"],
+        "subtitle": payload["category"],
+        "description": (f'{payload["article_count"] or 0} articles' if language == "en" else f'{payload["article_count"] or 0} 篇文章'),
     }
 
 
-def _serialize_column_candidate(row) -> dict:
+def _serialize_column_candidate(row, *, language: str) -> dict:
+    payload = localize_column_payload(dict(row), language=language)
     return {
         "entity_type": "column",
-        "id": row["id"],
-        "slug": row["slug"],
-        "title": row["name"],
-        "subtitle": row["icon"] or "",
-        "description": row["description"] or "",
+        "id": payload["id"],
+        "slug": payload["slug"],
+        "title": payload["name"],
+        "subtitle": payload.get("icon") or "",
+        "description": payload.get("description") or "",
     }
 
 
-def _resolve_slot_item(connection, entity_type: str, entity_id: int | None, entity_slug: str | None) -> dict | None:
+def _resolve_slot_item(connection, entity_type: str, entity_id: int | None, entity_slug: str | None, *, language: str) -> dict | None:
     if entity_type == "article":
         if not entity_id:
             return None
         row = connection.execute(
             """
-            SELECT id, slug, title, publish_date, excerpt
+            SELECT id, slug, title, publish_date, excerpt, main_topic, content, COALESCE(access_level, 'public') AS access_level
             FROM articles
             WHERE id = ?
             """,
             (entity_id,),
         ).fetchone()
-        return _serialize_article_candidate(row) if row else None
+        if not row:
+            return None
+        translation_map = _fetch_article_translation_map(connection, [row]) if language == "en" else {}
+        return _serialize_article_candidate(row, language=language, translation_map=translation_map)
 
     if entity_type == "topic":
         if entity_slug:
@@ -143,7 +248,7 @@ def _resolve_slot_item(connection, entity_type: str, entity_id: int | None, enti
             ).fetchone()
         else:
             row = None
-        return _serialize_topic_candidate(row) if row else None
+        return _serialize_topic_candidate(row, language=language) if row else None
 
     if entity_type == "tag":
         if entity_slug:
@@ -166,7 +271,7 @@ def _resolve_slot_item(connection, entity_type: str, entity_id: int | None, enti
             ).fetchone()
         else:
             row = None
-        return _serialize_tag_candidate(row) if row else None
+        return _serialize_tag_candidate(row, language=language) if row else None
 
     if entity_type == "column":
         if entity_slug:
@@ -189,12 +294,12 @@ def _resolve_slot_item(connection, entity_type: str, entity_id: int | None, enti
             ).fetchone()
         else:
             row = None
-        return _serialize_column_candidate(row) if row else None
+        return _serialize_column_candidate(row, language=language) if row else None
 
     return None
 
 
-def _validate_candidate_payload(connection, slot_key: str, payload: dict) -> tuple[str, int | None, str | None, dict]:
+def _validate_candidate_payload(connection, slot_key: str, payload: dict, *, language: str) -> tuple[str, int | None, str | None, dict]:
     entity_type = _normalize_entity_type(slot_key, payload.get("entity_type"))
     entity_id = payload.get("id")
     entity_slug = str(payload.get("slug") or "").strip() or None
@@ -202,7 +307,7 @@ def _validate_candidate_payload(connection, slot_key: str, payload: dict) -> tup
         entity_id = int(entity_id) if entity_id is not None else None
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="Invalid candidate id") from exc
-    serialized = _resolve_slot_item(connection, entity_type, entity_id, entity_slug)
+    serialized = _resolve_slot_item(connection, entity_type, entity_id, entity_slug, language=language)
     if serialized is None:
         raise HTTPException(status_code=404, detail="Selected content item no longer exists")
     return entity_type, entity_id, entity_slug or serialized.get("slug"), serialized
@@ -279,130 +384,109 @@ def update_trending_config(payload: dict) -> dict:
     return get_trending_config()
 
 
-def search_content_operation_candidates(entity_type: str, query: str = "", limit: int = 12) -> list[dict]:
+def search_content_operation_candidates(entity_type: str, query: str = "", limit: int = 12, *, language: str = "zh") -> list[dict]:
     safe_limit = _normalize_limit(limit)
     normalized_type = str(entity_type or "").strip()
+    normalized_language = _normalize_content_language(language)
     text = str(query or "").strip()
-    like_value = f"%{text}%"
     with connection_scope() as connection:
         if normalized_type == "article":
-            if text:
-                rows = connection.execute(
-                    """
-                    SELECT id, slug, title, publish_date, excerpt
-                    FROM articles
-                    WHERE title LIKE ? OR slug LIKE ?
-                    ORDER BY publish_date DESC, id DESC
-                    LIMIT ?
-                    """,
-                    (like_value, like_value, safe_limit),
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    """
-                    SELECT id, slug, title, publish_date, excerpt
-                    FROM articles
-                    ORDER BY publish_date DESC, id DESC
-                    LIMIT ?
-                    """,
-                    (safe_limit,),
-                ).fetchall()
-            return [_serialize_article_candidate(row) for row in rows]
+            rows = connection.execute(
+                """
+                SELECT id, slug, title, publish_date, excerpt, main_topic, content, COALESCE(access_level, 'public') AS access_level
+                FROM articles
+                ORDER BY publish_date DESC, id DESC
+                """
+            ).fetchall()
+            translation_map = _fetch_article_translation_map(connection, rows) if normalized_language == "en" else {}
+            payload: list[dict] = []
+            for row in rows:
+                candidate = _serialize_article_candidate(row, language=normalized_language, translation_map=translation_map)
+                if not candidate or not _matches_candidate_query(candidate, text):
+                    continue
+                payload.append(candidate)
+                if len(payload) >= safe_limit:
+                    break
+            return payload
 
         if normalized_type == "topic":
-            if text:
-                rows = connection.execute(
-                    """
-                    SELECT id, slug, title, description, type
-                    FROM topics
-                    WHERE status = 'published' AND (title LIKE ? OR slug LIKE ?)
-                    ORDER BY updated_at DESC, title ASC
-                    LIMIT ?
-                    """,
-                    (like_value, like_value, safe_limit),
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    """
-                    SELECT id, slug, title, description, type
-                    FROM topics
-                    WHERE status = 'published'
-                    ORDER BY
-                        CASE type
-                            WHEN 'seed' THEN 1
-                            WHEN 'auto' THEN 2
-                            WHEN 'editorial' THEN 3
-                            WHEN 'timeline' THEN 4
-                            ELSE 5
-                        END,
-                        view_count DESC,
-                        title ASC
-                    LIMIT ?
-                    """,
-                    (safe_limit,),
-                ).fetchall()
-            return [_serialize_topic_candidate(row) for row in rows]
+            rows = connection.execute(
+                """
+                SELECT id, slug, title, description, type
+                FROM topics
+                WHERE status = 'published'
+                ORDER BY
+                    CASE type
+                        WHEN 'seed' THEN 1
+                        WHEN 'auto' THEN 2
+                        WHEN 'editorial' THEN 3
+                        WHEN 'timeline' THEN 4
+                        ELSE 5
+                    END,
+                    view_count DESC,
+                    title ASC
+                """
+            ).fetchall()
+            payload = []
+            for row in rows:
+                candidate = _serialize_topic_candidate(row, language=normalized_language)
+                if not _matches_candidate_query(candidate, text):
+                    continue
+                payload.append(candidate)
+                if len(payload) >= safe_limit:
+                    break
+            return payload
 
         if normalized_type == "tag":
-            if text:
-                rows = connection.execute(
-                    """
-                    SELECT id, slug, name, category, article_count
-                    FROM tags
-                    WHERE name LIKE ? OR slug LIKE ?
-                    ORDER BY article_count DESC, name ASC
-                    LIMIT ?
-                    """,
-                    (like_value, like_value, safe_limit),
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    """
-                    SELECT id, slug, name, category, article_count
-                    FROM tags
-                    ORDER BY article_count DESC, name ASC
-                    LIMIT ?
-                    """,
-                    (safe_limit,),
-                ).fetchall()
-            return [_serialize_tag_candidate(row) for row in rows]
+            rows = connection.execute(
+                """
+                SELECT id, slug, name, category, article_count
+                FROM tags
+                ORDER BY article_count DESC, name ASC
+                """
+            ).fetchall()
+            payload = []
+            for row in rows:
+                candidate = _serialize_tag_candidate(row, language=normalized_language)
+                if not candidate or not _matches_candidate_query(candidate, text):
+                    continue
+                payload.append(candidate)
+                if len(payload) >= safe_limit:
+                    break
+            return payload
 
         if normalized_type == "column":
-            if text:
-                rows = connection.execute(
-                    """
-                    SELECT id, slug, name, description, icon
-                    FROM columns
-                    WHERE name LIKE ? OR slug LIKE ?
-                    ORDER BY sort_order ASC, name ASC
-                    LIMIT ?
-                    """,
-                    (like_value, like_value, safe_limit),
-                ).fetchall()
-            else:
-                rows = connection.execute(
-                    """
-                    SELECT id, slug, name, description, icon
-                    FROM columns
-                    ORDER BY sort_order ASC, name ASC
-                    LIMIT ?
-                    """,
-                    (safe_limit,),
-                ).fetchall()
-            return [_serialize_column_candidate(row) for row in rows]
+            rows = connection.execute(
+                """
+                SELECT id, slug, name, description, icon
+                FROM columns
+                ORDER BY sort_order ASC, name ASC
+                """
+            ).fetchall()
+            payload = []
+            for row in rows:
+                candidate = _serialize_column_candidate(row, language=normalized_language)
+                if not _matches_candidate_query(candidate, text):
+                    continue
+                payload.append(candidate)
+                if len(payload) >= safe_limit:
+                    break
+            return payload
 
     raise HTTPException(status_code=400, detail="Unsupported candidate type")
 
 
-def list_home_content_slots() -> dict[str, list[dict]]:
+def list_home_content_slots(language: str = "zh") -> dict[str, list[dict]]:
+    normalized_language = _normalize_content_language(language)
     with connection_scope() as connection:
         rows = connection.execute(
             """
             SELECT slot_key, entity_type, entity_id, entity_slug, sort_order, metadata_json
             FROM home_content_slots
-            WHERE is_active = 1
+            WHERE is_active = 1 AND language = ?
             ORDER BY slot_key ASC, sort_order ASC, id ASC
-            """
+            """,
+            (normalized_language,),
         ).fetchall()
         grouped: dict[str, list[dict]] = {slot_key: [] for slot_key in HOME_SLOT_DEFINITIONS}
         for row in rows:
@@ -418,19 +502,27 @@ def list_home_content_slots() -> dict[str, list[dict]]:
         return grouped
 
 
-def get_content_operations_state() -> dict:
+def get_content_operations_state(language: str = "zh") -> dict:
+    normalized_language = _normalize_content_language(language)
     with connection_scope() as connection:
         slot_rows = connection.execute(
             """
             SELECT id, slot_key, entity_type, entity_id, entity_slug, sort_order
             FROM home_content_slots
-            WHERE is_active = 1
+            WHERE is_active = 1 AND language = ?
             ORDER BY slot_key ASC, sort_order ASC, id ASC
-            """
+            """,
+            (normalized_language,),
         ).fetchall()
         grouped: dict[str, list[dict]] = {slot_key: [] for slot_key in HOME_SLOT_DEFINITIONS}
         for row in slot_rows:
-            item = _resolve_slot_item(connection, row["entity_type"], row["entity_id"], row["entity_slug"])
+            item = _resolve_slot_item(
+                connection,
+                row["entity_type"],
+                row["entity_id"],
+                row["entity_slug"],
+                language=normalized_language,
+            )
             if item:
                 grouped.setdefault(row["slot_key"], []).append(item)
 
@@ -446,6 +538,8 @@ def get_content_operations_state() -> dict:
             )
 
     return {
+        "language": normalized_language,
+        "available_languages": list(SUPPORTED_CONTENT_LANGUAGES),
         "sections": sections,
         "trending": {
             **get_trending_config(),
@@ -454,8 +548,9 @@ def get_content_operations_state() -> dict:
     }
 
 
-def update_content_operations_section(slot_key: str, items: list[dict]) -> dict:
+def update_content_operations_section(slot_key: str, items: list[dict], *, language: str = "zh") -> dict:
     normalized_slot_key = _normalize_slot_key(slot_key)
+    normalized_language = _normalize_content_language(language)
     definition = HOME_SLOT_DEFINITIONS[normalized_slot_key]
     max_items = int(definition["max_items"])
     if len(items) > max_items:
@@ -466,18 +561,27 @@ def update_content_operations_section(slot_key: str, items: list[dict]) -> dict:
         normalized_items: list[tuple[str, int | None, str | None, int, str, str]] = []
         seen_keys: set[tuple[str, int | None, str | None]] = set()
         for index, item in enumerate(items):
-            entity_type, entity_id, entity_slug, _serialized = _validate_candidate_payload(connection, normalized_slot_key, item)
+            entity_type, entity_id, entity_slug, _serialized = _validate_candidate_payload(
+                connection,
+                normalized_slot_key,
+                item,
+                language=normalized_language,
+            )
             dedupe_key = (entity_type, entity_id, entity_slug)
             if dedupe_key in seen_keys:
                 continue
             seen_keys.add(dedupe_key)
             normalized_items.append((entity_type, entity_id, entity_slug, index, updated_at, updated_at))
 
-        connection.execute("DELETE FROM home_content_slots WHERE slot_key = ?", (normalized_slot_key,))
+        connection.execute(
+            "DELETE FROM home_content_slots WHERE language = ? AND slot_key = ?",
+            (normalized_language, normalized_slot_key),
+        )
         if normalized_items:
             connection.executemany(
                 """
                 INSERT INTO home_content_slots (
+                    language,
                     slot_key,
                     entity_type,
                     entity_id,
@@ -486,13 +590,13 @@ def update_content_operations_section(slot_key: str, items: list[dict]) -> dict:
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                [(normalized_slot_key, *item) for item in normalized_items],
+                [(normalized_language, normalized_slot_key, *item) for item in normalized_items],
             )
         connection.commit()
 
-    return get_content_operations_state()
+    return get_content_operations_state(language=normalized_language)
 
 
 def get_trending_sql_parts(window: str) -> dict[str, object]:

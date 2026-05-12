@@ -6,11 +6,12 @@ import {
   Headphones,
   LoaderCircle,
   LockKeyhole,
+  Trash2,
   Video,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { editPublishedMediaItem, fetchMediaHub, resolveApiUrl } from '../api/index.js'
+import { deletePublishedMediaItem, editPublishedMediaItem, fetchMediaHub, resolveApiUrl } from '../api/index.js'
 import { useAuth } from '../auth/AuthContext.js'
 import MediaMarkdownBlock from '../components/media/MediaMarkdownBlock.jsx'
 import { useLanguage } from '../i18n/LanguageContext.js'
@@ -71,7 +72,7 @@ function buildDetailPath(kind, slug) {
   return `/${kind}/${encodeRoutePart(slug)}`
 }
 
-function MediaCard({ item, kind, isEnglish, detailLabel, canEdit, editBusy, onEditAgain }) {
+function MediaCard({ item, kind, isEnglish, detailLabel, canEdit, editBusy, deleteBusy, onEditAgain, onDeletePublished }) {
   const detailPath = buildDetailPath(kind, item.slug)
   const coverUrl = resolveApiUrl(item.cover_image_url)
   const isAudio = kind === 'audio'
@@ -153,15 +154,27 @@ function MediaCard({ item, kind, isEnglish, detailLabel, canEdit, editBusy, onEd
             {detailLabel}
           </Link>
           {canEdit ? (
-            <button
-              type="button"
-              onClick={() => onEditAgain?.(item.media_item_id || item.id)}
-              disabled={editBusy}
-              className="inline-flex items-center gap-2 rounded-full border border-fudan-blue/15 bg-white px-5 py-3 text-sm font-semibold text-fudan-blue transition hover:border-fudan-blue/35 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {editBusy ? <LoaderCircle size={16} className="animate-spin" /> : <FilePenLine size={16} />}
-              {isEnglish ? 'Edit again' : '重新编辑'}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => onEditAgain?.(item.media_item_id || item.id)}
+                disabled={editBusy || deleteBusy}
+                className="inline-flex items-center gap-2 rounded-full border border-fudan-blue/15 bg-white px-5 py-3 text-sm font-semibold text-fudan-blue transition hover:border-fudan-blue/35 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {editBusy ? <LoaderCircle size={16} className="animate-spin" /> : <FilePenLine size={16} />}
+                {isEnglish ? 'Edit again' : '重新编辑'}
+              </button>
+              <button
+                type="button"
+                onClick={() => onDeletePublished?.(item)}
+                disabled={deleteBusy || editBusy}
+                title={isEnglish ? 'Delete to draft box' : '删除并退回草稿箱'}
+                className="inline-flex items-center gap-2 rounded-full border border-red-200 bg-white px-5 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {deleteBusy ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                {isEnglish ? 'Delete to drafts' : '删除退回草稿箱'}
+              </button>
+            </>
           ) : null}
         </div>
       </div>
@@ -177,6 +190,7 @@ function MediaHubPage({ kind = 'audio' }) {
   const [error, setError] = useState('')
   const [editError, setEditError] = useState('')
   const [editingMediaId, setEditingMediaId] = useState(null)
+  const [deletingMediaId, setDeletingMediaId] = useState(null)
 
   useEffect(() => {
     let mounted = true
@@ -212,6 +226,27 @@ function MediaHubPage({ kind = 'audio' }) {
       setEditError(nextError?.message || (isEnglish ? 'Failed to open this media item for editing.' : '打开该媒体的重编草稿失败。'))
     } finally {
       setEditingMediaId(null)
+    }
+  }
+
+  const handleDeletePublished = async (mediaItem) => {
+    const mediaItemId = mediaItem?.media_item_id || mediaItem?.id
+    if (!mediaItemId || deletingMediaId) return
+    const confirmed = window.confirm(
+      isEnglish
+        ? `Delete "${mediaItem.title}" from the live ${kind === 'audio' ? 'audio' : 'video'} page and move it back to the draft box?`
+        : `确定将《${mediaItem.title}》从正式${kind === 'audio' ? '音频' : '视频'}页删除并退回草稿箱吗？`,
+    )
+    if (!confirmed) return
+    setEditError('')
+    setDeletingMediaId(mediaItemId)
+    try {
+      const draft = await deletePublishedMediaItem(mediaItemId, accessToken)
+      navigate(`/media-studio?draft_id=${draft.id}&unpublished=1`)
+    } catch (nextError) {
+      setEditError(nextError?.message || (isEnglish ? 'Failed to move this media item back to drafts.' : '将该媒体退回草稿箱失败。'))
+    } finally {
+      setDeletingMediaId(null)
     }
   }
 
@@ -270,7 +305,9 @@ function MediaHubPage({ kind = 'audio' }) {
               detailLabel={copy.detail}
               canEdit={isAdmin}
               editBusy={editingMediaId === (item.media_item_id || item.id)}
+              deleteBusy={deletingMediaId === (item.media_item_id || item.id)}
               onEditAgain={handleEditAgain}
+              onDeletePublished={handleDeletePublished}
             />
           ))}
         </section>

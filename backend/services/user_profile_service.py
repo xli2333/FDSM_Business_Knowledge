@@ -556,7 +556,8 @@ def get_business_profile(user: dict | None, membership: dict | None) -> dict:
     if not user or not membership or not membership.get("user_id"):
         return build_guest_business_profile()
 
-    auth_source = "debug" if (user.get("raw_user") or {}).get("debug") else "supabase"
+    raw_user = user.get("raw_user") or {}
+    auth_source = "debug" if raw_user.get("debug") else raw_user.get("auth_source") or "supabase"
     ensure_business_user_profile(
         membership["user_id"],
         membership.get("email") or user.get("email"),

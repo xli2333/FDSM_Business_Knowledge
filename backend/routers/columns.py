@@ -9,10 +9,10 @@ router = APIRouter(prefix="/api", tags=["columns"])
 
 
 @router.get("/columns", response_model=list[ColumnSummary])
-def columns():
-    return list_columns()
+def columns(language: str = "zh"):
+    return list_columns(language=language)
 
 
 @router.get("/columns/{slug}/articles")
-def column_articles(slug: str, page: int = 1, page_size: int = 12):
-    return get_column_articles(slug, page=page, page_size=page_size)
+def column_articles(slug: str, page: int = 1, page_size: int = 12, language: str = "zh"):
+    return get_column_articles(slug, page=page, page_size=page_size, language=language)

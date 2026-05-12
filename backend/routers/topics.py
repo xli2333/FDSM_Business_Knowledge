@@ -11,7 +11,7 @@ from backend.services.catalog_service import (
     list_topics,
 )
 from backend.services.membership_service import require_paid_profile
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 from backend.services.topic_engine import auto_generate_topics
 
 router = APIRouter(prefix="/api", tags=["topics"])

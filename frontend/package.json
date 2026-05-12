@@ -22,10 +22,12 @@
     "markdown:acceptance:round140": "node scripts/chat_markdown_acceptance_round140.mjs",
     "knowledge-ui:acceptance:round141": "node scripts/knowledge_ui_acceptance_round141.mjs",
     "knowledge-ui:acceptance:round142": "node scripts/knowledge_ui_acceptance_round142.mjs",
-    "knowledge-ui:acceptance:round143": "node scripts/knowledge_ui_acceptance_round143.mjs"
+    "knowledge-ui:acceptance:round143": "node scripts/knowledge_ui_acceptance_round143.mjs",
+    "bookmark:acceptance:round162": "node scripts/bookmark_acceptance_round162.mjs",
+    "editorial:async:acceptance:round176": "node scripts/editorial_async_acceptance_round176.mjs",
+    "cas:login:acceptance:round178": "node scripts/cas_login_acceptance_round178.mjs"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.57.4",
     "@tailwindcss/postcss": "^4.1.18",
     "@tiptap/extension-color": "^3.22.3",
     "@tiptap/extension-text-align": "^3.22.3",

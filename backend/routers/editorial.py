@@ -20,7 +20,8 @@ from backend.models.schemas import (
     EditorialWorkflowRequest,
 )
 from backend.services.membership_service import require_admin_profile
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
+from backend.services.async_task_service import create_editorial_ai_task, get_async_task
 from backend.services.editorial_service import (
     create_editorial_article,
     create_editorial_from_upload,
@@ -39,6 +40,7 @@ from backend.services.editorial_service import (
     publish_editorial_article,
     reopen_published_article_to_editorial_draft_box,
     render_editorial_html,
+    unpublish_published_article_to_editorial_draft_box,
     upload_editorial_cover_image,
     update_editorial_workflow,
     update_editorial_article,
@@ -148,6 +150,17 @@ def editorial_source_reopen_draft(
     return reopen_published_article_to_editorial_draft_box(article_id)
 
 
+@router.delete("/source-articles/{article_id}", response_model=EditorialArticleDetail)
+def editorial_source_unpublish_to_draft(
+    article_id: int,
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    _require_editorial_admin(authorization, x_debug_user_id, x_debug_user_email)
+    return unpublish_published_article_to_editorial_draft_box(article_id)
+
+
 @router.post("/articles", response_model=EditorialArticleDetail)
 def editorial_article_create(
     payload: EditorialArticleCreate,
@@ -236,6 +249,18 @@ def editorial_article_auto_format(
     return auto_format_editorial_article(editorial_id, payload.model_dump(exclude_unset=True))
 
 
+@router.post("/articles/{editorial_id}/tasks/auto-format")
+def editorial_article_auto_format_task(
+    editorial_id: int,
+    payload: EditorialAutoFormatRequest,
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    _require_editorial_admin(authorization, x_debug_user_id, x_debug_user_email)
+    return create_editorial_ai_task(editorial_id, "auto-format", payload.model_dump(exclude_unset=True))
+
+
 @router.post("/articles/{editorial_id}/autotag", response_model=EditorialArticleDetail)
 def editorial_article_autotag(
     editorial_id: int,
@@ -258,6 +283,17 @@ def editorial_article_auto_summary(
     return generate_editorial_summary(editorial_id)
 
 
+@router.post("/articles/{editorial_id}/tasks/auto-summary")
+def editorial_article_auto_summary_task(
+    editorial_id: int,
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    _require_editorial_admin(authorization, x_debug_user_id, x_debug_user_email)
+    return create_editorial_ai_task(editorial_id, "auto-summary", {})
+
+
 @router.post("/articles/{editorial_id}/auto-translate", response_model=EditorialArticleDetail)
 def editorial_article_auto_translate(
     editorial_id: int,
@@ -267,6 +303,28 @@ def editorial_article_auto_translate(
 ):
     _require_editorial_admin(authorization, x_debug_user_id, x_debug_user_email)
     return generate_editorial_translation(editorial_id)
+
+
+@router.post("/articles/{editorial_id}/tasks/auto-translate")
+def editorial_article_auto_translate_task(
+    editorial_id: int,
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    _require_editorial_admin(authorization, x_debug_user_id, x_debug_user_email)
+    return create_editorial_ai_task(editorial_id, "auto-translate", {})
+
+
+@router.get("/tasks/{task_id}")
+def editorial_async_task(
+    task_id: str,
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    _require_editorial_admin(authorization, x_debug_user_id, x_debug_user_email)
+    return get_async_task(task_id)
 
 
 @router.post("/articles/{editorial_id}/workflow", response_model=EditorialArticleDetail)

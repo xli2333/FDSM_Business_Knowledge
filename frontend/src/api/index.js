@@ -1,8 +1,30 @@
 import { getOrCreateVisitorId } from '../lib/visitor.js'
 import { getDebugAuthHeaders } from '../auth/debugAuth.js'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000/api'
+const DEFAULT_API_BASE_URL = import.meta.env.PROD ? '/api' : 'http://127.0.0.1:8000/api'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL
 const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '')
+const DEBUG_AUTH_HEADERS_ENABLED = import.meta.env.DEV
+  ? import.meta.env.VITE_ENABLE_DEBUG_AUTH !== '0'
+  : import.meta.env.VITE_ENABLE_DEBUG_AUTH === '1'
+const CAS_AUTH_STORAGE_KEY = 'fdsm-cas-token'
+
+export function getCasAuthToken() {
+  if (typeof window === 'undefined') return ''
+  return window.localStorage.getItem(CAS_AUTH_STORAGE_KEY) || ''
+}
+
+export function saveCasAuthToken(token) {
+  if (typeof window === 'undefined') return
+  if (token) {
+    window.localStorage.setItem(CAS_AUTH_STORAGE_KEY, token)
+  }
+}
+
+export function clearCasAuthToken() {
+  if (typeof window === 'undefined') return
+  window.localStorage.removeItem(CAS_AUTH_STORAGE_KEY)
+}
 
 function extractErrorMessage(detail, fallback) {
   if (typeof detail === 'string' && detail.trim()) return detail
@@ -31,8 +53,8 @@ function extractErrorMessage(detail, fallback) {
 async function request(path, options = {}) {
   const isFormData = options.body instanceof FormData
   const visitorId = typeof window !== 'undefined' ? getOrCreateVisitorId() : null
-  const authToken = options.authToken
-  const debugAuthHeaders = authToken ? {} : getDebugAuthHeaders()
+  const authToken = options.authToken || getCasAuthToken()
+  const debugAuthHeaders = authToken || !DEBUG_AUTH_HEADERS_ENABLED ? {} : getDebugAuthHeaders()
   const response = await fetch(`${API_BASE_URL}${path}`, {
     headers: {
       ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
@@ -91,8 +113,8 @@ export function fetchAdminOverview(authToken = '') {
   })
 }
 
-export function fetchAdminContentOperations(authToken = '') {
-  return request('/admin/content-ops', {
+export function fetchAdminContentOperations(authToken = '', language = 'zh') {
+  return request(`/admin/content-ops?language=${encodeURIComponent(language)}`, {
     authToken,
   })
 }
@@ -107,18 +129,19 @@ export function fetchAdminRagOverview(authToken = '', assetLimit = 12, jobLimit 
   })
 }
 
-export function fetchAdminContentCandidates(entityType, query = '', limit = 12, authToken = '') {
+export function fetchAdminContentCandidates(entityType, query = '', limit = 12, authToken = '', language = 'zh') {
   const params = new URLSearchParams()
   params.set('entity_type', entityType)
   params.set('limit', String(limit))
+  params.set('language', language)
   if (query) params.set('query', query)
   return request(`/admin/content-ops/candidates?${params.toString()}`, {
     authToken,
   })
 }
 
-export function updateAdminContentSection(slotKey, payload, authToken = '') {
-  return request(`/admin/content-ops/sections/${encodeURIComponent(slotKey)}`, {
+export function updateAdminContentSection(slotKey, payload, authToken = '', language = 'zh') {
+  return request(`/admin/content-ops/sections/${encodeURIComponent(slotKey)}?language=${encodeURIComponent(language)}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
     authToken,
@@ -182,6 +205,13 @@ export function reopenEditorialSourceArticle(articleId) {
   })
 }
 
+export function deletePublishedArticle(articleId, authToken = '') {
+  return request(`/editorial/source-articles/${articleId}`, {
+    method: 'DELETE',
+    authToken,
+  })
+}
+
 export function fetchEditorialDashboard(limit = 6) {
   return request(`/editorial/dashboard?limit=${limit}`)
 }
@@ -227,6 +257,29 @@ export function autoTranslateEditorialArticle(id) {
   return request(`/editorial/articles/${id}/auto-translate`, {
     method: 'POST',
   })
+}
+
+export function startEditorialAutoFormatTask(id, payload) {
+  return request(`/editorial/articles/${id}/tasks/auto-format`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function startEditorialAutoSummaryTask(id) {
+  return request(`/editorial/articles/${id}/tasks/auto-summary`, {
+    method: 'POST',
+  })
+}
+
+export function startEditorialAutoTranslateTask(id) {
+  return request(`/editorial/articles/${id}/tasks/auto-translate`, {
+    method: 'POST',
+  })
+}
+
+export function fetchEditorialAsyncTask(taskId) {
+  return request(`/editorial/tasks/${encodeURIComponent(taskId)}`)
 }
 
 export function uploadEditorialFile(file, options = {}) {
@@ -319,12 +372,14 @@ export function fetchTrendingArticles(limit = 12, offset = 0, window = 'week', l
   )
 }
 
-export function fetchColumns() {
-  return request('/columns')
+export function fetchColumns(language = 'zh') {
+  return request(`/columns?language=${encodeURIComponent(language)}`)
 }
 
-export function fetchColumnArticles(slug, page = 1, pageSize = 12) {
-  return request(`/columns/${encodeURIComponent(slug)}/articles?page=${page}&page_size=${pageSize}`)
+export function fetchColumnArticles(slug, page = 1, pageSize = 12, language = 'zh') {
+  return request(
+    `/columns/${encodeURIComponent(slug)}/articles?page=${page}&page_size=${pageSize}&language=${encodeURIComponent(language)}`,
+  )
 }
 
 export function fetchOrganizations(limit = 60) {
@@ -504,6 +559,13 @@ export function editPublishedMediaItem(mediaItemId, authToken = '') {
   })
 }
 
+export function deletePublishedMediaItem(mediaItemId, authToken = '') {
+  return request(`/media/admin/published-items/${mediaItemId}`, {
+    method: 'DELETE',
+    authToken,
+  })
+}
+
 export function uploadMediaAdminFile(file, kind, usage = 'media', options = {}) {
   const formData = new FormData()
   formData.append('kind', kind)
@@ -543,6 +605,16 @@ export function fetchAdminBillingOrders(authToken = '', limit = 100, query = '')
 
 export function fetchMyLibrary(authToken = '', limit = 12) {
   return request(`/me/library?limit=${limit}`, {
+    authToken,
+  })
+}
+
+export function fetchTodayBookmark(authToken = '', { targetDate = '', language = 'zh', forceRefresh = false } = {}) {
+  const params = new URLSearchParams()
+  if (targetDate) params.set('target_date', targetDate)
+  params.set('language', language)
+  if (forceRefresh) params.set('force_refresh', '1')
+  return request(`/me/bookmark/today?${params.toString()}`, {
     authToken,
   })
 }

@@ -50,6 +50,7 @@ function candidateKey(item) {
 function AdminContentOperationsPage() {
   const { accessToken } = useAuth()
   const { isEnglish } = useLanguage()
+  const [contentLanguage, setContentLanguage] = useState(isEnglish ? 'en' : 'zh')
   const [sections, setSections] = useState({})
   const [trending, setTrending] = useState({
     default_window: 'week',
@@ -85,6 +86,11 @@ function AdminContentOperationsPage() {
         bookmarkWeight: 'Bookmark weight',
         saveTrending: 'Save trending rules',
         refresh: 'Reload',
+        contentLanguage: 'Homepage language',
+        languageZh: 'Chinese page',
+        languageEn: 'English page',
+        currentScope: 'You are editing the homepage distribution for this language only.',
+        trendingScope: 'Trending rules remain global and are shared by Chinese and English homepages.',
       }
     : {
         title: '内容运营后台',
@@ -107,18 +113,27 @@ function AdminContentOperationsPage() {
         bookmarkWeight: '收藏权重',
         saveTrending: '保存热门榜规则',
         refresh: '刷新',
+        contentLanguage: '编排页面',
+        languageZh: '中文首页',
+        languageEn: '英文首页',
+        currentScope: '当前仅编辑所选语言首页的内容分布。',
+        trendingScope: '热门榜规则仍为全局共享，中文与英文首页共用一套。',
       }
 
   const orderedSections = useMemo(() => SLOT_ORDER.map((slotKey) => sections[slotKey]).filter(Boolean), [sections])
 
   useEffect(() => {
-    fetchAdminContentOperations(accessToken)
+    fetchAdminContentOperations(accessToken, contentLanguage)
       .then((payload) => {
         setSections(normalizeSections(payload.sections))
         setTrending(payload.trending)
       })
       .catch(() => setError(isEnglish ? 'Failed to load content operations.' : '内容运营后台加载失败。'))
-  }, [accessToken, isEnglish])
+  }, [accessToken, contentLanguage, isEnglish])
+
+  useEffect(() => {
+    setSearchState({})
+  }, [contentLanguage])
 
   async function run(taskKey, task) {
     setBusy(taskKey)
@@ -177,7 +192,7 @@ function AdminContentOperationsPage() {
     const section = sections[slotKey]
     if (!section) return
     const query = searchState[slotKey]?.query || ''
-    const results = await fetchAdminContentCandidates(section.entity_type, query, 12, accessToken)
+    const results = await fetchAdminContentCandidates(section.entity_type, query, 12, accessToken, contentLanguage)
     setSearchState((current) => ({
       ...current,
       [slotKey]: {
@@ -200,7 +215,7 @@ function AdminContentOperationsPage() {
             type="button"
             onClick={() =>
               run('refresh', async () => {
-                const payload = await fetchAdminContentOperations(accessToken)
+                const payload = await fetchAdminContentOperations(accessToken, contentLanguage)
                 setSections(normalizeSections(payload.sections))
                 setTrending(payload.trending)
                 setMessage(isEnglish ? 'Configuration reloaded.' : '配置已刷新。')
@@ -211,6 +226,32 @@ function AdminContentOperationsPage() {
             {busy === 'refresh' ? <LoaderCircle size={16} className="animate-spin" /> : <RefreshCw size={16} />}
             {copy.refresh}
           </button>
+        </div>
+        <div className="mt-6 flex flex-wrap items-center gap-3">
+          <span className="text-sm font-semibold text-slate-500">{copy.contentLanguage}</span>
+          <div className="inline-flex rounded-full border border-slate-200 bg-slate-50 p-1">
+            {[
+              { value: 'zh', label: copy.languageZh },
+              { value: 'en', label: copy.languageEn },
+            ].map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => {
+                  setContentLanguage(option.value)
+                  setMessage('')
+                  setError('')
+                }}
+                className={[
+                  'rounded-full px-4 py-2 text-sm font-semibold transition',
+                  contentLanguage === option.value ? 'bg-fudan-blue text-white shadow-sm' : 'text-slate-500 hover:text-fudan-blue',
+                ].join(' ')}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <div className="text-sm text-slate-500">{copy.currentScope}</div>
         </div>
       </section>
 
@@ -233,7 +274,7 @@ function AdminContentOperationsPage() {
                   type="button"
                   onClick={() =>
                     run(`save-${section.slot_key}`, async () => {
-                      const payload = await updateAdminContentSection(section.slot_key, { items: section.items }, accessToken)
+                      const payload = await updateAdminContentSection(section.slot_key, { items: section.items }, accessToken, contentLanguage)
                       setSections(normalizeSections(payload.sections))
                       setTrending(payload.trending)
                       setMessage(isEnglish ? `Saved ${sectionCopy?.title || section.slot_key}.` : `已保存${sectionCopy?.title || section.slot_key}。`)
@@ -359,6 +400,7 @@ function AdminContentOperationsPage() {
           <div>
             <div className="section-kicker">{copy.trendingTitle}</div>
             <p className="mt-2 text-sm leading-7 text-slate-500">{copy.trendingDesc}</p>
+            <p className="mt-2 text-sm leading-7 text-slate-400">{copy.trendingScope}</p>
           </div>
           <button
             type="button"

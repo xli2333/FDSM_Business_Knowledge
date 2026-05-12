@@ -4,7 +4,7 @@ from fastapi import APIRouter, Header
 
 from backend.models.schemas import MembershipProfile
 from backend.services.membership_service import get_membership_profile
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 
 router = APIRouter(prefix="/api/membership", tags=["membership"])
 

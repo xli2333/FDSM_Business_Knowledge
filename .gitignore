@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 *$py.class
 .env
+.env.*
+!.env.docker.example
+!.env.production.example
 .venv
 venv/
 ENV/
@@ -40,6 +43,8 @@ archive/legacy_pre_knowledge_base/
 faiss_index_business/
 qa/
 uploads/
+data/
+backups/
 公众号排版/
 _publish_clean/
 reports/*.log

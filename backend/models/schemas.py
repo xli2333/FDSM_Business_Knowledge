@@ -722,6 +722,39 @@ class UserLibraryResponse(BaseModel):
     top_tags: list[str] = Field(default_factory=list)
 
 
+class TodayBookmarkPhrase(BaseModel):
+    text: str
+    emphasis: int = 1
+    tone: str = "blue"
+    source_article_id: int | None = None
+
+
+class TodayBookmarkThemeHint(BaseModel):
+    label: str
+    weight: int = 0
+
+
+class TodayBookmarkResponse(BaseModel):
+    available: bool = False
+    bookmark_date: str | None = None
+    weekday_label: str | None = None
+    date_label: str | None = None
+    language: str = "zh"
+    primary_theme: str | None = None
+    headline_theme: str | None = None
+    theme_reason: str | None = None
+    article_count: int = 0
+    source_hash: str | None = None
+    generated_at: str | None = None
+    cached: bool = False
+    qr_label: str | None = None
+    qr_target_url: str | None = None
+    source_articles: list[ArticleCard] = Field(default_factory=list)
+    theme_hints: list[TodayBookmarkThemeHint] = Field(default_factory=list)
+    phrases: list[TodayBookmarkPhrase] = Field(default_factory=list)
+    empty_message: str | None = None
+
+
 class UserLibraryChatRequest(BaseModel):
     messages: list[ChatMessageIn]
     language: str = "zh"
@@ -963,6 +996,8 @@ class AdminTrendingConfigUpdateRequest(BaseModel):
 
 
 class AdminContentOperationsResponse(BaseModel):
+    language: str = "zh"
+    available_languages: list[str] = Field(default_factory=lambda: ["zh", "en"])
     sections: list[AdminContentSection] = Field(default_factory=list)
     trending: AdminTrendingConfig = Field(default_factory=AdminTrendingConfig)
 

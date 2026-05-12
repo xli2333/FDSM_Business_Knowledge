@@ -24,7 +24,7 @@ from backend.services.content_operations_service import (
 )
 from backend.services.membership_service import list_memberships, require_admin_profile, update_membership
 from backend.services.rag_admin_service import get_rag_admin_overview
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 from backend.services.user_profile_service import get_admin_overview
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -106,6 +106,7 @@ def admin_billing_orders(
 
 @router.get("/content-ops", response_model=AdminContentOperationsResponse)
 def admin_content_operations(
+    language: str = "zh",
     authorization: str | None = Header(default=None),
     x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
     x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
@@ -116,7 +117,7 @@ def admin_content_operations(
         debug_user_email=x_debug_user_email,
     )
     require_admin_profile(user)
-    return get_content_operations_state()
+    return get_content_operations_state(language=language)
 
 
 @router.get("/rag", response_model=RagAdminOverviewResponse)
@@ -146,6 +147,7 @@ def admin_content_operation_candidates(
     entity_type: str,
     query: str = "",
     limit: int = 12,
+    language: str = "zh",
     authorization: str | None = Header(default=None),
     x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
     x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
@@ -156,13 +158,14 @@ def admin_content_operation_candidates(
         debug_user_email=x_debug_user_email,
     )
     require_admin_profile(user)
-    return search_content_operation_candidates(entity_type, query=query, limit=limit)
+    return search_content_operation_candidates(entity_type, query=query, limit=limit, language=language)
 
 
 @router.put("/content-ops/sections/{slot_key}", response_model=AdminContentOperationsResponse)
 def admin_update_content_operations_section(
     slot_key: str,
     payload: AdminContentSectionUpdateRequest,
+    language: str = "zh",
     authorization: str | None = Header(default=None),
     x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
     x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
@@ -173,7 +176,7 @@ def admin_update_content_operations_section(
         debug_user_email=x_debug_user_email,
     )
     require_admin_profile(user)
-    return update_content_operations_section(slot_key, [item.model_dump() for item in payload.items])
+    return update_content_operations_section(slot_key, [item.model_dump() for item in payload.items], language=language)
 
 
 @router.put("/content-ops/trending", response_model=AdminTrendingConfig)

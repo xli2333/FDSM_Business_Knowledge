@@ -1,0 +1,291 @@
+name: fdsmarticles-prod
+
+x-default-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-20m}
+    max-file: "${LOG_MAX_FILE:-7}"
+
+services:
+  backend-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    env_file:
+      - .env.production
+    environment:
+      APP_ENV: production
+      FDSM_DATA_DIR: /data
+      DATABASE_BACKEND: ${DATABASE_BACKEND:-sqlite}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_WRITE_RETRY_ATTEMPTS: ${DB_WRITE_RETRY_ATTEMPTS:-5}
+      DB_WRITE_RETRY_BASE_DELAY_SECONDS: ${DB_WRITE_RETRY_BASE_DELAY_SECONDS:-0.05}
+      DB_SLOW_QUERY_MS: ${DB_SLOW_QUERY_MS:-750}
+      DB_OBSERVABILITY_ENABLED: ${DB_OBSERVABILITY_ENABLED:-1}
+      HOME_FEED_CACHE_TTL_SECONDS: ${HOME_FEED_CACHE_TTL_SECONDS:-30}
+      METRICS_ENABLED: ${METRICS_ENABLED:-1}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      REQUEST_LOG_JSON_ENABLED: ${REQUEST_LOG_JSON_ENABLED:-1}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.05}
+      AUTH_BACKEND: ${AUTH_BACKEND:-cas}
+      CAS_ENABLED: ${CAS_ENABLED:-1}
+      CAS_SERVER_URL: ${CAS_SERVER_URL:-}
+      CAS_SERVICE_BASE_URL: ${CAS_SERVICE_BASE_URL:-}
+      CAS_SERVICE_URL: ${CAS_SERVICE_URL:-}
+      CAS_VALIDATE_TIMEOUT_SECONDS: ${CAS_VALIDATE_TIMEOUT_SECONDS:-8}
+      CAS_SESSION_TTL_SECONDS: ${CAS_SESSION_TTL_SECONDS:-28800}
+      CAS_SESSION_RETENTION_DAYS: ${CAS_SESSION_RETENTION_DAYS:-30}
+      CAS_ADMIN_EMPLOYEE_NUMBERS: ${CAS_ADMIN_EMPLOYEE_NUMBERS:-}
+      CAS_ADMIN_USERNAMES: ${CAS_ADMIN_USERNAMES:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}@redis:6379/0
+      ASYNC_TASKS_ENABLED: "1"
+      ASYNC_TASK_QUEUE_KEY: ${ASYNC_TASK_QUEUE_KEY:-fdsm:async-tasks}
+      ASYNC_TASK_DEAD_LETTER_QUEUE_KEY: ${ASYNC_TASK_DEAD_LETTER_QUEUE_KEY:-fdsm:async-tasks:dead-letter}
+      MEDIA_AUDIO_UPLOAD_MAX_BYTES: ${MEDIA_AUDIO_UPLOAD_MAX_BYTES:-536870912}
+      MEDIA_VIDEO_UPLOAD_MAX_BYTES: ${MEDIA_VIDEO_UPLOAD_MAX_BYTES:-2147483648}
+      MEDIA_TEXT_UPLOAD_MAX_BYTES: ${MEDIA_TEXT_UPLOAD_MAX_BYTES:-20971520}
+      MEDIA_IMAGE_UPLOAD_MAX_BYTES: ${MEDIA_IMAGE_UPLOAD_MAX_BYTES:-20971520}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-3}
+      GUNICORN_PRELOAD: ${GUNICORN_PRELOAD:-0}
+      GUNICORN_WORKER_CONNECTIONS: ${GUNICORN_WORKER_CONNECTIONS:-1000}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-180}
+      GUNICORN_GRACEFUL_TIMEOUT: ${GUNICORN_GRACEFUL_TIMEOUT:-30}
+      GUNICORN_KEEP_ALIVE: ${GUNICORN_KEEP_ALIVE:-5}
+      GUNICORN_MAX_REQUESTS: ${GUNICORN_MAX_REQUESTS:-1000}
+      GUNICORN_MAX_REQUESTS_JITTER: ${GUNICORN_MAX_REQUESTS_JITTER:-100}
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    expose:
+      - "8000"
+    restart: unless-stopped
+    cpus: ${BACKEND_WEB_CPUS:-2.0}
+    mem_limit: ${BACKEND_WEB_MEMORY:-2g}
+    deploy:
+      resources:
+        limits:
+          cpus: "${BACKEND_WEB_CPUS:-2.0}"
+          memory: ${BACKEND_WEB_MEMORY:-2g}
+        reservations:
+          cpus: "${BACKEND_WEB_RESERVATION_CPUS:-0.5}"
+          memory: ${BACKEND_WEB_RESERVATION_MEMORY:-512m}
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/ready', timeout=5).read()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 45s
+      retries: 3
+
+  backend-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    env_file:
+      - .env.production
+    environment:
+      APP_ENV: production
+      FDSM_DATA_DIR: /data
+      DATABASE_BACKEND: ${DATABASE_BACKEND:-sqlite}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_WRITE_RETRY_ATTEMPTS: ${DB_WRITE_RETRY_ATTEMPTS:-5}
+      DB_WRITE_RETRY_BASE_DELAY_SECONDS: ${DB_WRITE_RETRY_BASE_DELAY_SECONDS:-0.05}
+      DB_SLOW_QUERY_MS: ${DB_SLOW_QUERY_MS:-750}
+      DB_OBSERVABILITY_ENABLED: ${DB_OBSERVABILITY_ENABLED:-1}
+      HOME_FEED_CACHE_TTL_SECONDS: ${HOME_FEED_CACHE_TTL_SECONDS:-30}
+      AUTH_BACKEND: ${AUTH_BACKEND:-cas}
+      CAS_ENABLED: ${CAS_ENABLED:-1}
+      CAS_SERVER_URL: ${CAS_SERVER_URL:-}
+      CAS_SERVICE_BASE_URL: ${CAS_SERVICE_BASE_URL:-}
+      CAS_SERVICE_URL: ${CAS_SERVICE_URL:-}
+      CAS_VALIDATE_TIMEOUT_SECONDS: ${CAS_VALIDATE_TIMEOUT_SECONDS:-8}
+      CAS_SESSION_TTL_SECONDS: ${CAS_SESSION_TTL_SECONDS:-28800}
+      CAS_SESSION_RETENTION_DAYS: ${CAS_SESSION_RETENTION_DAYS:-30}
+      CAS_ADMIN_EMPLOYEE_NUMBERS: ${CAS_ADMIN_EMPLOYEE_NUMBERS:-}
+      CAS_ADMIN_USERNAMES: ${CAS_ADMIN_USERNAMES:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}
+      REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}@redis:6379/0
+      ASYNC_TASKS_ENABLED: "1"
+      ASYNC_TASK_QUEUE_KEY: ${ASYNC_TASK_QUEUE_KEY:-fdsm:async-tasks}
+      ASYNC_TASK_DEAD_LETTER_QUEUE_KEY: ${ASYNC_TASK_DEAD_LETTER_QUEUE_KEY:-fdsm:async-tasks:dead-letter}
+      MEDIA_AUDIO_UPLOAD_MAX_BYTES: ${MEDIA_AUDIO_UPLOAD_MAX_BYTES:-536870912}
+      MEDIA_VIDEO_UPLOAD_MAX_BYTES: ${MEDIA_VIDEO_UPLOAD_MAX_BYTES:-2147483648}
+      MEDIA_TEXT_UPLOAD_MAX_BYTES: ${MEDIA_TEXT_UPLOAD_MAX_BYTES:-20971520}
+      MEDIA_IMAGE_UPLOAD_MAX_BYTES: ${MEDIA_IMAGE_UPLOAD_MAX_BYTES:-20971520}
+      PYTHONUNBUFFERED: "1"
+    command: ["python", "-m", "backend.worker"]
+    volumes:
+      - ./data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend-web:
+        condition: service_healthy
+    restart: unless-stopped
+    cpus: ${BACKEND_WORKER_CPUS:-1.0}
+    mem_limit: ${BACKEND_WORKER_MEMORY:-1g}
+    deploy:
+      resources:
+        limits:
+          cpus: "${BACKEND_WORKER_CPUS:-1.0}"
+          memory: ${BACKEND_WORKER_MEMORY:-1g}
+        reservations:
+          cpus: "${BACKEND_WORKER_RESERVATION_CPUS:-0.25}"
+          memory: ${BACKEND_WORKER_RESERVATION_MEMORY:-512m}
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "python", "-m", "backend.worker_healthcheck"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  backend-housekeeping:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    env_file:
+      - .env.production
+    environment:
+      APP_ENV: production
+      FDSM_DATA_DIR: /data
+      DATABASE_BACKEND: ${DATABASE_BACKEND:-sqlite}
+      DATABASE_URL: ${DATABASE_URL:-}
+      DB_WRITE_RETRY_ATTEMPTS: ${DB_WRITE_RETRY_ATTEMPTS:-5}
+      DB_WRITE_RETRY_BASE_DELAY_SECONDS: ${DB_WRITE_RETRY_BASE_DELAY_SECONDS:-0.05}
+      DB_SLOW_QUERY_MS: ${DB_SLOW_QUERY_MS:-750}
+      DB_OBSERVABILITY_ENABLED: ${DB_OBSERVABILITY_ENABLED:-1}
+      CAS_SESSION_RETENTION_DAYS: ${CAS_SESSION_RETENTION_DAYS:-30}
+      HOUSEKEEPING_INTERVAL_SECONDS: ${HOUSEKEEPING_INTERVAL_SECONDS:-3600}
+      HOUSEKEEPING_HEARTBEAT_PATH: ${HOUSEKEEPING_HEARTBEAT_PATH:-/tmp/fdsm-housekeeping.ok}
+      HOUSEKEEPING_HEALTH_MAX_AGE_SECONDS: ${HOUSEKEEPING_HEALTH_MAX_AGE_SECONDS:-7200}
+      PYTHONUNBUFFERED: "1"
+    command: ["python", "-m", "backend.scripts.housekeeping", "--loop"]
+    volumes:
+      - ./data:/data
+    depends_on:
+      backend-web:
+        condition: service_healthy
+    restart: unless-stopped
+    cpus: ${HOUSEKEEPING_CPUS:-0.25}
+    mem_limit: ${HOUSEKEEPING_MEMORY:-256m}
+    deploy:
+      resources:
+        limits:
+          cpus: "${HOUSEKEEPING_CPUS:-0.25}"
+          memory: ${HOUSEKEEPING_MEMORY:-256m}
+        reservations:
+          cpus: "${HOUSEKEEPING_RESERVATION_CPUS:-0.05}"
+          memory: ${HOUSEKEEPING_RESERVATION_MEMORY:-128m}
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, pathlib, time; p=pathlib.Path(os.getenv('HOUSEKEEPING_HEARTBEAT_PATH', '/tmp/fdsm-housekeeping.ok')); max_age=int(os.getenv('HOUSEKEEPING_HEALTH_MAX_AGE_SECONDS', '7200')); raise SystemExit(0 if p.exists() and time.time() - p.stat().st_mtime <= max_age else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+        VITE_ENABLE_DEBUG_AUTH: "0"
+    depends_on:
+      backend-web:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:80"
+    volumes:
+      - ./data/audio:/data/audio:ro
+      - ./data/uploads/editorial:/data/uploads/editorial:ro
+      - ./data/uploads/media:/data/uploads/media:ro
+    restart: unless-stopped
+    cpus: ${FRONTEND_CPUS:-1.0}
+    mem_limit: ${FRONTEND_MEMORY:-512m}
+    deploy:
+      resources:
+        limits:
+          cpus: "${FRONTEND_CPUS:-1.0}"
+          memory: ${FRONTEND_MEMORY:-512m}
+        reservations:
+          cpus: "${FRONTEND_RESERVATION_CPUS:-0.1}"
+          memory: ${FRONTEND_RESERVATION_MEMORY:-128m}
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "${REDIS_MAXMEMORY:-512mb}", "--maxmemory-policy", "allkeys-lru", "--requirepass", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}
+    volumes:
+      - redis-data:/data
+    expose:
+      - "6379"
+    restart: unless-stopped
+    cpus: ${REDIS_CPUS:-0.5}
+    mem_limit: ${REDIS_MEMORY:-768m}
+    deploy:
+      resources:
+        limits:
+          cpus: "${REDIS_CPUS:-0.5}"
+          memory: ${REDIS_MEMORY:-768m}
+        reservations:
+          cpus: "${REDIS_RESERVATION_CPUS:-0.1}"
+          memory: ${REDIS_RESERVATION_MEMORY:-256m}
+    logging: *default-logging
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env.production}", "ping"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  backup:
+    build:
+      context: .
+      dockerfile: Dockerfile.backup
+    env_file:
+      - .env.production
+    environment:
+      DATA_DIR: /data
+      BACKUP_DIR: /backups
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      BACKUP_COMPRESS: ${BACKUP_COMPRESS:-1}
+      BACKUP_ENCRYPTION_REQUIRED: ${BACKUP_ENCRYPTION_REQUIRED:-1}
+      BACKUP_ENCRYPTION_RECIPIENT: ${BACKUP_ENCRYPTION_RECIPIENT:-}
+      BACKUP_OFFSITE_REQUIRED: ${BACKUP_OFFSITE_REQUIRED:-1}
+      BACKUP_OFFSITE_TARGET: ${BACKUP_OFFSITE_TARGET:-}
+      BACKUP_OFFSITE_COMMAND: ${BACKUP_OFFSITE_COMMAND:-rclone}
+    volumes:
+      - ./data:/data
+      - ./backups:/backups
+    command: ["python", "/ops/backup_sqlite.py", "--loop"]
+    restart: unless-stopped
+    cpus: ${BACKUP_CPUS:-0.5}
+    mem_limit: ${BACKUP_MEMORY:-512m}
+    deploy:
+      resources:
+        limits:
+          cpus: "${BACKUP_CPUS:-0.5}"
+          memory: ${BACKUP_MEMORY:-512m}
+        reservations:
+          cpus: "${BACKUP_RESERVATION_CPUS:-0.1}"
+          memory: ${BACKUP_RESERVATION_MEMORY:-128m}
+    logging: *default-logging
+
+volumes:
+  redis-data:

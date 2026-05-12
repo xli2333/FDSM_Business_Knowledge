@@ -9,7 +9,7 @@ from backend.models.schemas import (
     BillingPlansResponse,
 )
 from backend.services.billing_service import create_checkout_intent, get_billing_profile, list_billing_plans
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 
 router = APIRouter(prefix="/api/billing", tags=["billing"])
 

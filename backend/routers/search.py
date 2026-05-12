@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header, HTTPException
 from backend.models.schemas import SearchRequest, SearchResponse
 from backend.services.rag_engine import search_articles, suggest
 from backend.services.membership_service import get_membership_profile
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 
 router = APIRouter(prefix="/api", tags=["search"])
 

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import itertools
 import re
 import shutil
 import tempfile
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -113,6 +115,92 @@ def _headers(user_id: str, email: str) -> dict[str, str]:
         "X-Debug-User-Id": user_id,
         "X-Debug-User-Email": email,
     }
+
+
+def _insert_view_event(*, article_id: int, user_id: str, view_date: str, created_at: str | None = None) -> None:
+    timestamp = created_at or f"{view_date}T10:00:00"
+    with connection_scope() as connection:
+        connection.execute(
+            """
+            INSERT INTO article_view_events (
+                article_id, visitor_id, user_id, view_date, source, created_at
+            )
+            VALUES (?, ?, ?, ?, 'article', ?)
+            """,
+            (article_id, f"visitor-{user_id}-{article_id}", user_id, view_date, timestamp),
+        )
+        connection.commit()
+
+
+def test_my_today_bookmark_returns_theme_and_phrases_from_today_views(client, monkeypatch):
+    target_date = date.today().isoformat()
+    article_id = _insert_article(
+        title="AI算力账本的转向",
+        slug="ai-capex-ledger",
+        publish_date=target_date,
+        excerpt="折旧年限、推理需求和GPU资产正在改写云服务商的利润结构。",
+        content="人工智能正在把算力基础设施推向新的投资周期。GPU、推理、神经网络和生成式AI成为今天讨论的中心。",
+    )
+    second_article_id = _insert_article(
+        title="神经网络与大模型的组织代价",
+        slug="neural-network-ops",
+        publish_date=target_date,
+        excerpt="大语言模型和机器学习团队正在重新定义企业内部的研发边界。",
+        content="机器学习、Transformer、深度学习和生成式AI推动企业组织重新分工，算力与模型协同成为核心议题。",
+    )
+    _insert_view_event(article_id=article_id, user_id="bookmark-user", view_date=target_date, created_at=f"{target_date}T09:30:00")
+    _insert_view_event(article_id=second_article_id, user_id="bookmark-user", view_date=target_date, created_at=f"{target_date}T11:00:00")
+
+    monkeypatch.setattr(
+        ai_service,
+        "generate_daily_bookmark_theme",
+        lambda **kwargs: {
+            "theme": "AI&大语言模型",
+            "headline_theme": "AI&大语言模型",
+            "core_theme": "AI",
+            "reason": "今天的阅读主要围绕 AI、算力与大模型展开。",
+            "model": "gemini-3.0-flash",
+        },
+    )
+
+    response = client.get(
+        f"/api/me/bookmark/today?target_date={target_date}&language=zh",
+        headers=_headers("bookmark-user", "bookmark@example.com"),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is True
+    assert payload["primary_theme"] == "AI"
+    assert payload["headline_theme"] == "AI&大语言模型"
+    assert payload["article_count"] == 2
+    assert payload["cached"] is False
+    assert payload["phrases"]
+    assert any(item["text"] == "AI算力账本的转向" for item in payload["phrases"])
+    assert any(item["text"] == "神经网络" for item in payload["phrases"])
+    assert payload["source_articles"][0]["id"] == second_article_id
+
+    cached_response = client.get(
+        f"/api/me/bookmark/today?target_date={target_date}&language=zh",
+        headers=_headers("bookmark-user", "bookmark@example.com"),
+    )
+    assert cached_response.status_code == 200
+    cached_payload = cached_response.json()
+    assert cached_payload["cached"] is True
+    assert cached_payload["source_hash"] == payload["source_hash"]
+
+
+def test_my_today_bookmark_returns_empty_state_when_user_has_no_views(client):
+    target_date = date.today().isoformat()
+    response = client.get(
+        f"/api/me/bookmark/today?target_date={target_date}&language=zh",
+        headers=_headers("empty-bookmark-user", "empty-bookmark@example.com"),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["available"] is False
+    assert payload["article_count"] == 0
+    assert payload["phrases"] == []
+    assert payload["empty_message"]
 
 
 def test_paid_member_can_create_theme_with_initial_article_and_list_it(client):
@@ -747,14 +835,14 @@ def test_sync_public_articles_for_rag_backfills_public_articles_only(client):
     public_article_id = _insert_article(
         title="Public Backfill Article",
         slug="public-backfill-article",
-        publish_date="2026-03-30",
+        publish_date="9999-03-30",
         excerpt="This public article should be backfilled.",
         content="The public article discusses operating cadence, pricing control, and execution discipline.",
     )
     paid_article_id = _insert_article(
         title="Paid Backfill Article",
         slug="paid-backfill-article",
-        publish_date="2026-03-29",
+        publish_date="9999-03-29",
         excerpt="This paid article should stay outside the default public backfill.",
         content="The paid article discusses a premium topic outside the default public backfill run.",
     )
@@ -775,10 +863,13 @@ def test_process_pending_ingestion_jobs_consumes_queued_jobs(client):
     article_id = _insert_article(
         title="Queued Ingestion Article",
         slug="queued-ingestion-article",
-        publish_date="2026-03-28",
+        publish_date="9999-03-28",
         excerpt="This article should be processed by the pending-job runner.",
         content="The queued article describes sequencing, review loops, and how product teams handle new operating constraints.",
     )
+    with connection_scope() as connection:
+        connection.execute("DELETE FROM ingestion_jobs WHERE status IN ('pending', 'failed', 'running')")
+        connection.commit()
 
     queued = queue_article_ingestion(article_id, trigger_source="test_pending_queue")
     assert queued["job"]["status"] == "pending"
@@ -805,6 +896,7 @@ def test_embed_chunk_texts_rotates_to_next_key_after_failure(client, monkeypatch
 
     monkeypatch.setattr(knowledge_embedding_service, "is_chunk_embedding_enabled", lambda: True)
     monkeypatch.setattr(knowledge_embedding_service, "get_embedding_api_keys", lambda: ("key-one", "key-two"))
+    monkeypatch.setattr(knowledge_embedding_service, "_EMBEDDING_REQUEST_COUNTER", itertools.count())
     monkeypatch.setattr(
         knowledge_embedding_service,
         "_embedding_client",
@@ -915,6 +1007,7 @@ def test_embed_chunk_texts_rotates_keys_after_retry(monkeypatch):
 
     monkeypatch.setattr(knowledge_embedding_service, "is_chunk_embedding_enabled", lambda: True)
     monkeypatch.setattr(knowledge_embedding_service, "get_embedding_api_keys", lambda: ("key-one", "key-two"))
+    monkeypatch.setattr(knowledge_embedding_service, "_EMBEDDING_REQUEST_COUNTER", itertools.count())
     monkeypatch.setattr(
         knowledge_embedding_service,
         "_embedding_client",

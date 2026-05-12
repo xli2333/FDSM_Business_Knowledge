@@ -19,7 +19,7 @@ from backend.services.catalog_service import (
 )
 from backend.services.engagement_service import get_article_engagement, record_article_view, set_article_reaction
 from backend.services.membership_service import get_membership_profile
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 from backend.services.translation_service import get_article_translation
 
 router = APIRouter(prefix="/api", tags=["articles"])

@@ -256,7 +256,7 @@ with connection_scope() as connection:
             draft_box_state = 'active',
             formatter_model = 'gemini-3-flash-preview',
             last_formatted_at = ?,
-            summary_model = 'gemini-2.5-flash',
+            summary_model = 'gemini-3.0-flash',
             summary_updated_at = ?,
             published_summary_html = summary_html,
             published_final_html = final_html,

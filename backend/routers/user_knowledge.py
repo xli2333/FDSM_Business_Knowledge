@@ -14,7 +14,7 @@ from backend.models.schemas import (
     UserKnowledgeThemeUpdateRequest,
 )
 from backend.services.membership_service import require_paid_profile
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 from backend.services.user_knowledge_service import (
     chat_with_user_knowledge_theme,
     create_user_knowledge_theme,

@@ -173,7 +173,8 @@ function readMediaDuration(file, kind) {
 function MediaStudioPage() {
   const { isEnglish } = useLanguage()
   const [searchParams, setSearchParams] = useSearchParams()
-  const mediaInputRef = useRef(null)
+  const audioMediaInputRef = useRef(null)
+  const videoMediaInputRef = useRef(null)
   const coverInputRef = useRef(null)
   const textUploadInputRef = useRef(null)
   const selectedIdRef = useRef(null)
@@ -190,6 +191,7 @@ function MediaStudioPage() {
     return Number.isFinite(value) && value > 0 ? value : null
   }, [searchParams])
   const reopenedFromPublished = searchParams.get('reopened') === '1'
+  const unpublishedFromPublished = searchParams.get('unpublished') === '1'
 
   useEffect(() => {
     selectedIdRef.current = selectedId
@@ -212,6 +214,7 @@ function MediaStudioPage() {
     const next = new URLSearchParams(searchParams)
     next.delete('draft_id')
     next.delete('reopened')
+    next.delete('unpublished')
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
 
@@ -280,8 +283,11 @@ function MediaStudioPage() {
     [isEnglish, resetMessages],
   )
 
-  const persistDraft = useCallback(async () => {
-    const payload = buildPersistPayload(form)
+  const persistDraft = useCallback(async (overrides = {}) => {
+    const payload = buildPersistPayload({
+      ...form,
+      ...overrides,
+    })
     return selectedId ? updateMediaAdminItem(selectedId, payload) : createMediaAdminItem(payload)
   }, [form, selectedId])
 
@@ -319,16 +325,29 @@ function MediaStudioPage() {
       setMessage(isEnglish ? 'Draft saved.' : '草稿已保存。')
     })
 
-  const handleDelete = () =>
-    run('delete', async () => {
-      if (!selectedId) return
-      if (requestedDraftId && requestedDraftId === selectedId) {
+  const handleDeleteDraft = (draftId) => {
+    if (!draftId) return
+    const draftTitle =
+      drafts.find((item) => item.id === draftId)?.title ||
+      (detail?.id === draftId ? detail.title : '') ||
+      byLanguage(isEnglish, '未命名草稿', 'Untitled draft')
+    const confirmed = window.confirm(
+      isEnglish
+        ? `Delete draft "${draftTitle}"? This cannot be undone.`
+        : `确定删除草稿《${draftTitle}》吗？此操作不可撤销。`,
+    )
+    if (!confirmed) return
+    run(`delete-${draftId}`, async () => {
+      if (requestedDraftId && requestedDraftId === draftId) {
         clearMediaEntryQuery()
       }
-      await deleteMediaAdminItem(selectedId)
-      await refreshAll()
+      await deleteMediaAdminItem(draftId)
+      await refreshAll(selectedIdRef.current && selectedIdRef.current !== draftId ? selectedIdRef.current : null)
       setMessage(isEnglish ? 'Draft deleted.' : '草稿已删除。')
     })
+  }
+
+  const handleDelete = () => handleDeleteDraft(selectedId)
 
   const handleGenerateCopy = () =>
     run('generate', async () => {
@@ -365,24 +384,34 @@ function MediaStudioPage() {
       )
     })
 
-  const handleUpload = async (usage, file) => {
+  const handleUpload = async (usage, file, uploadKind = form.kind) => {
     if (!file) return
+    const effectiveKind = uploadKind || form.kind
+    const busyKey = usage === 'media' ? `media-${effectiveKind}` : usage
     resetMessages()
-    setBusy(usage)
+    setBusy(busyKey)
     try {
       let workingDraftId = selectedId || null
       if (selectedId || hasLocalDraftSeed(form)) {
-        const savedDraft = await persistDraft()
+        const savedDraft = await persistDraft(usage === 'media' ? { kind: effectiveKind } : {})
         workingDraftId = savedDraft.id
       }
-      const duration = usage === 'media' ? await readMediaDuration(file, form.kind) : 0
-      const uploaded = await uploadMediaAdminFile(file, form.kind, usage, {
+      const duration = usage === 'media' ? await readMediaDuration(file, effectiveKind) : 0
+      const uploaded = await uploadMediaAdminFile(file, effectiveKind, usage, {
         draftId: workingDraftId || undefined,
         durationSeconds: duration || Number(form.duration_seconds || 0),
       })
       await refreshAll(uploaded?.item?.id || workingDraftId || null)
       if (usage === 'media') {
-        setMessage(isEnglish ? 'Primary media uploaded and synced to the draft.' : '主媒体文件已上传并写入草稿。')
+        setMessage(
+          effectiveKind === 'video'
+            ? isEnglish
+              ? 'Video uploaded and synced to the draft.'
+              : '视频文件已上传并写入草稿。'
+            : isEnglish
+              ? 'Audio uploaded and synced to the draft.'
+              : '音频文件已上传并写入草稿。',
+        )
       } else if (usage === 'cover') {
         setMessage(isEnglish ? 'Cover image uploaded and synced to the draft.' : '首页图已上传并写入草稿。')
       } else {
@@ -560,17 +589,16 @@ function MediaStudioPage() {
             <div className="mt-4 max-h-[min(46vh,28rem)] space-y-2 overflow-y-auto pr-1">
               {drafts.length ? (
                 drafts.map((item) => (
-                  <button
+                  <div
                     key={item.id}
-                    type="button"
-                    onClick={() => handleSelect(item.id)}
+                    data-media-draft-row={item.id}
                     className={[
-                      'block w-full rounded-[1rem] border px-3 py-3 text-left transition',
+                      'flex w-full items-start gap-2 rounded-[1rem] border px-3 py-3 text-left transition',
                       selectedId === item.id ? 'border-fudan-blue bg-fudan-blue/5 shadow-[0_8px_18px_rgba(13,7,131,0.08)]' : 'border-slate-200/70 bg-white hover:bg-slate-50',
                     ].join(' ')}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
+                    <button type="button" onClick={() => handleSelect(item.id)} className="min-w-0 flex-1 text-left">
+                      <div>
                         <div className="truncate font-serif text-base font-bold text-fudan-blue">
                           {item.title || byLanguage(isEnglish, '未命名草稿', 'Untitled draft')}
                         </div>
@@ -580,11 +608,23 @@ function MediaStudioPage() {
                           <span>{formatDuration(item.duration_seconds, isEnglish)}</span>
                         </div>
                       </div>
+                    </button>
+                    <div className="flex shrink-0 items-center gap-2">
                       <span className={['rounded-full border px-2.5 py-1 text-[10px] font-semibold', getDraftStatusClass(item)].join(' ')}>
                         {getDraftStatusLabel(item, isEnglish)}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteDraft(item.id)}
+                        disabled={Boolean(busy)}
+                        aria-label={isEnglish ? `Delete draft ${item.title || item.id}` : `删除草稿 ${item.title || item.id}`}
+                        title={isEnglish ? 'Delete draft' : '删除草稿'}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 transition hover:border-red-200 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {busy === `delete-${item.id}` ? <LoaderCircle size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                      </button>
                     </div>
-                  </button>
+                  </div>
                 ))
               ) : (
                 <div className="rounded-[1rem] border border-dashed border-slate-300 p-4 text-sm leading-7 text-slate-500">
@@ -596,6 +636,13 @@ function MediaStudioPage() {
         </aside>
 
         <section className="space-y-6">
+          {unpublishedFromPublished && requestedDraftId && detail?.id === requestedDraftId ? (
+            <div className="rounded-[1.4rem] border border-fudan-blue/15 bg-fudan-blue/5 px-5 py-4 text-sm leading-7 text-fudan-blue">
+              {isEnglish
+                ? 'The live media item was removed and moved back to this draft box. Deleting it here will remove it completely.'
+                : '正式媒体内容已删除并退回到当前草稿箱。在这里再次删除，才会完全删除。'}
+            </div>
+          ) : null}
           {detail?.is_reopened_from_published ? (
             <div className="rounded-[1.4rem] border border-fudan-orange/20 bg-fudan-orange/5 px-5 py-4 text-sm leading-7 text-fudan-orange">
               {reopenedFromPublished && requestedDraftId && detail?.id === requestedDraftId
@@ -724,15 +771,24 @@ function MediaStudioPage() {
                 : '先上传主媒体文件，再上传一份文本素材。音频使用转录，视频使用脚本。只要有转录，后台就会优先把整份转录交给 AI 生成摘要、节目简介和章节；只有 AI 暂不可用时，才会回退到基础提取结果。'}
             </p>
 
-            <div className="mt-6 grid gap-4 md:grid-cols-3">
+            <div className="mt-6 grid gap-4 md:grid-cols-4">
               <button
                 type="button"
-                onClick={() => mediaInputRef.current?.click()}
+                onClick={() => audioMediaInputRef.current?.click()}
                 disabled={Boolean(busy)}
                 className="inline-flex items-center justify-center gap-2 rounded-[1.2rem] border border-fudan-blue/20 bg-fudan-blue/5 px-4 py-4 text-sm font-semibold text-fudan-blue transition hover:bg-fudan-blue/10 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {busy === 'media' ? <LoaderCircle size={16} className="animate-spin" /> : <UploadCloud size={16} />}
-                {isEnglish ? 'Upload media' : '上传主媒体'}
+                {busy === 'media-audio' ? <LoaderCircle size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+                {isEnglish ? 'Upload audio' : '上传音频'}
+              </button>
+              <button
+                type="button"
+                onClick={() => videoMediaInputRef.current?.click()}
+                disabled={Boolean(busy)}
+                className="inline-flex items-center justify-center gap-2 rounded-[1.2rem] border border-sky-200 bg-sky-50 px-4 py-4 text-sm font-semibold text-sky-700 transition hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {busy === 'media-video' ? <LoaderCircle size={16} className="animate-spin" /> : <UploadCloud size={16} />}
+                {isEnglish ? 'Upload video' : '上传视频'}
               </button>
               <button
                 type="button"
@@ -923,7 +979,7 @@ function MediaStudioPage() {
                 disabled={Boolean(busy) || !canDeleteDraft(detail)}
                 className="inline-flex items-center justify-center gap-2 rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-600 transition hover:border-red-200 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {busy === 'delete' ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                {busy === `delete-${selectedId}` ? <LoaderCircle size={16} className="animate-spin" /> : <Trash2 size={16} />}
                 {isEnglish ? 'Delete draft' : '删除草稿'}
               </button>
             </div>
@@ -957,15 +1013,29 @@ function MediaStudioPage() {
       </section>
 
       <input
-        ref={mediaInputRef}
+        ref={audioMediaInputRef}
         type="file"
-        data-upload-slot="media"
-        accept={getUploadAccept(form.kind, 'media')}
+        data-upload-slot="media-audio"
+        data-upload-kind="audio"
+        accept={getUploadAccept('audio', 'media')}
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0]
           event.target.value = ''
-          handleUpload('media', file)
+          handleUpload('media', file, 'audio')
+        }}
+      />
+      <input
+        ref={videoMediaInputRef}
+        type="file"
+        data-upload-slot="media-video"
+        data-upload-kind="video"
+        accept={getUploadAccept('video', 'media')}
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ''
+          handleUpload('media', file, 'video')
         }}
       />
       <input

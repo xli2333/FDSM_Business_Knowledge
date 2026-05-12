@@ -9,6 +9,7 @@ const AnalyticsPage = lazy(() => import('./pages/AnalyticsPage.jsx'))
 const AdminConsolePage = lazy(() => import('./pages/AdminConsolePage.jsx'))
 const AdminContentOperationsPage = lazy(() => import('./pages/AdminContentOperationsPage.jsx'))
 const AdminMembershipsPage = lazy(() => import('./pages/AdminMembershipsPage.jsx'))
+const CasCallbackPage = lazy(() => import('./pages/CasCallbackPage.jsx'))
 const ChatPage = lazy(() => import('./pages/ChatPage.jsx'))
 const CommercialPage = lazy(() => import('./pages/CommercialPage.jsx'))
 const CommercialLeadsPage = lazy(() => import('./pages/CommercialLeadsPage.jsx'))
@@ -28,6 +29,7 @@ const RagAdminPage = lazy(() => import('./pages/RagAdminPage.jsx'))
 const SearchPage = lazy(() => import('./pages/SearchPage.jsx'))
 const TagPage = lazy(() => import('./pages/TagPage.jsx'))
 const TimeMachinePage = lazy(() => import('./pages/TimeMachinePage.jsx'))
+const TodayBookmarkPage = lazy(() => import('./pages/TodayBookmarkPage.jsx'))
 const TopicPage = lazy(() => import('./pages/TopicPage.jsx'))
 const TopicsPage = lazy(() => import('./pages/TopicsPage.jsx'))
 const UserKnowledgeHubPage = lazy(() => import('./pages/UserKnowledgeHubPage.jsx'))
@@ -45,6 +47,7 @@ function App() {
         <Route element={<SiteLayout />}>
           <Route path="/" element={<HomePage />} />
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/login/cas-callback" element={<CasCallbackPage />} />
           <Route path="/search" element={<SearchPage />} />
           <Route
             path="/analytics"
@@ -98,6 +101,14 @@ function App() {
           <Route path="/topic/:slug" element={<TopicPage />} />
           <Route path="/topics" element={<TopicsPage />} />
           <Route path="/time-machine" element={<TimeMachinePage />} />
+          <Route
+            path="/me/today-bookmark"
+            element={
+              <ProtectedRoute fallbackPath="/login">
+                <TodayBookmarkPage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/chat"
             element={

@@ -396,7 +396,9 @@ def process_ingestion_job(job_id: int) -> dict[str, Any]:
             _mark_job(connection, job_id, status="running", stage="loading_article", timestamp=timestamp, started=True)
             article = _fetch_article_row(connection, int(job["article_id"]))
             source_hash = build_article_source_hash(article)
-            version = connection.execute("SELECT * FROM article_versions WHERE id = ?", (int(job["version_id"]),)).fetchone()
+            version = None
+            if job["version_id"] is not None:
+                version = connection.execute("SELECT * FROM article_versions WHERE id = ?", (int(job["version_id"]),)).fetchone()
             if version is None or str(version["source_hash"]) != source_hash:
                 version, _ = _ensure_version(connection, article, source_hash, timestamp)
                 connection.execute(

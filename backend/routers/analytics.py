@@ -5,7 +5,7 @@ from fastapi import APIRouter, Header
 from backend.models.schemas import AnalyticsOverviewResponse
 from backend.services.analytics_service import get_analytics_overview
 from backend.services.membership_service import require_admin_profile
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 

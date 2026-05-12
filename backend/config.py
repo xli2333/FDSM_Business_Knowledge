@@ -8,6 +8,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+VALID_APP_ENVS = {"production", "staging", "development", "test"}
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower() or "development"
+if APP_ENV not in VALID_APP_ENVS:
+    raise RuntimeError(f"APP_ENV must be one of {sorted(VALID_APP_ENVS)}, got {APP_ENV!r}.")
+IS_PRODUCTION = APP_ENV == "production"
+IS_DEVELOPMENT_LIKE = APP_ENV in {"development", "test"}
 DATA_DIR = Path(os.getenv("FDSM_DATA_DIR", BASE_DIR))
 BUSINESS_DATA_DIR = DATA_DIR / "Fudan_Business_Knowledge_Data"
 SQLITE_DB_PATH = DATA_DIR / "fudan_knowledge_base.db"
@@ -18,6 +24,7 @@ LEGACY_FAISS_DB_DIR = LEGACY_ARCHIVE_DIR / "indexes" / "faiss_index"
 UPLOADS_DIR = DATA_DIR / "uploads"
 EDITORIAL_UPLOADS_DIR = UPLOADS_DIR / "editorial"
 MEDIA_UPLOADS_DIR = UPLOADS_DIR / "media"
+AUDIO_DIR = DATA_DIR / "audio"
 GEMINI_AGGREGATE_PATH = (
     BUSINESS_DATA_DIR / "gemini_flash_batch" / "output" / "aggregate" / "all_documents.json"
 )
@@ -29,12 +36,27 @@ MAX_PAGE_SIZE = 48
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "").strip()
 GEMINI_API_KEYS = [item.strip() for item in os.getenv("GEMINI_API_KEYS", "").split(",") if item.strip()]
 PRIMARY_GEMINI_KEY = GOOGLE_API_KEY or (GEMINI_API_KEYS[0] if GEMINI_API_KEYS else "")
-GEMINI_CHAT_MODEL = os.getenv("GEMINI_CHAT_MODEL", "gemini-3-flash").strip()
-GEMINI_FLASH_MODEL = os.getenv("GEMINI_FLASH_MODEL", "gemini-2.5-flash")
+_GEMINI_LEGACY_MODEL_ALIASES = {
+    "gemini-2.5-flash": "gemini-3.0-flash",
+    "gemini-2.5-pro": "gemini-3.0-flash",
+    "gemini-3-flash": "gemini-3.0-flash",
+}
+
+
+def normalize_configured_gemini_model_name(model_name: str) -> str:
+    cleaned = str(model_name or "").strip()
+    return _GEMINI_LEGACY_MODEL_ALIASES.get(cleaned, cleaned)
+
+
+GEMINI_CHAT_MODEL = normalize_configured_gemini_model_name(os.getenv("GEMINI_CHAT_MODEL", "gemini-3.0-flash").strip())
+GEMINI_FLASH_MODEL = normalize_configured_gemini_model_name(os.getenv("GEMINI_FLASH_MODEL", "gemini-3.0-flash").strip())
 GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001")
 GEMINI_EDITORIAL_FORMAT_MODEL = "gemini-3-flash-preview"
 GEMINI_RUNTIME_MODEL_ALIASES = {
+    "gemini-3.0-flash": "gemini-3-flash-preview",
     "gemini-3-flash": "gemini-3-flash-preview",
+    "gemini-2.5-flash": "gemini-3-flash-preview",
+    "gemini-2.5-pro": "gemini-3-flash-preview",
 }
 RAG_SEARCH_PROVIDER = os.getenv("RAG_SEARCH_PROVIDER", "local_chunk").strip().lower() or "local_chunk"
 RAG_ENABLE_INLINE_INGESTION = os.getenv("RAG_ENABLE_INLINE_INGESTION", "1").strip() != "0"
@@ -45,21 +67,84 @@ RAG_RETRIEVAL_CANDIDATE_LIMIT = max(8, int(os.getenv("RAG_RETRIEVAL_CANDIDATE_LI
 ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "").strip().rstrip("/")
 ELASTICSEARCH_API_KEY = os.getenv("ELASTICSEARCH_API_KEY", "").strip()
 ELASTICSEARCH_INDEX_PREFIX = os.getenv("ELASTICSEARCH_INDEX_PREFIX", "fdsm-rag").strip() or "fdsm-rag"
+REDIS_URL = os.getenv("REDIS_URL", "").strip()
+ASYNC_TASKS_ENABLED = os.getenv("ASYNC_TASKS_ENABLED", "0").strip() == "1" or bool(REDIS_URL)
+ASYNC_TASK_QUEUE_KEY = os.getenv("ASYNC_TASK_QUEUE_KEY", "fdsm:async-tasks").strip() or "fdsm:async-tasks"
+ASYNC_TASK_DEAD_LETTER_QUEUE_KEY = (
+    os.getenv("ASYNC_TASK_DEAD_LETTER_QUEUE_KEY", "").strip() or f"{ASYNC_TASK_QUEUE_KEY}:dead-letter"
+)
+ASYNC_TASK_POLL_TIMEOUT_SECONDS = max(1, int(os.getenv("ASYNC_TASK_POLL_TIMEOUT_SECONDS", "5")))
+DATABASE_BACKEND = os.getenv("DATABASE_BACKEND", "sqlite").strip().lower() or "sqlite"
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+DB_WRITE_RETRY_ATTEMPTS = max(0, int(os.getenv("DB_WRITE_RETRY_ATTEMPTS", "5")))
+DB_WRITE_RETRY_BASE_DELAY_SECONDS = max(0.01, float(os.getenv("DB_WRITE_RETRY_BASE_DELAY_SECONDS", "0.05")))
+DB_SLOW_QUERY_MS = max(0, int(os.getenv("DB_SLOW_QUERY_MS", "750")))
+DB_OBSERVABILITY_ENABLED = os.getenv("DB_OBSERVABILITY_ENABLED", "1").strip() != "0"
+HOME_FEED_CACHE_TTL_SECONDS = max(0, int(os.getenv("HOME_FEED_CACHE_TTL_SECONDS", "30")))
+METRICS_ENABLED = os.getenv("METRICS_ENABLED", "1").strip() != "0"
+METRICS_TOKEN = os.getenv("METRICS_TOKEN", "").strip()
+REQUEST_LOG_JSON_ENABLED = os.getenv("REQUEST_LOG_JSON_ENABLED", "1").strip() != "0"
+SENTRY_DSN = os.getenv("SENTRY_DSN", "").strip()
+SENTRY_TRACES_SAMPLE_RATE = max(0.0, min(1.0, float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.0"))))
+MEDIA_AUDIO_UPLOAD_MAX_BYTES = max(1, int(os.getenv("MEDIA_AUDIO_UPLOAD_MAX_BYTES", str(512 * 1024 * 1024))))
+MEDIA_VIDEO_UPLOAD_MAX_BYTES = max(1, int(os.getenv("MEDIA_VIDEO_UPLOAD_MAX_BYTES", str(2 * 1024 * 1024 * 1024))))
+MEDIA_TEXT_UPLOAD_MAX_BYTES = max(1, int(os.getenv("MEDIA_TEXT_UPLOAD_MAX_BYTES", str(20 * 1024 * 1024))))
+MEDIA_IMAGE_UPLOAD_MAX_BYTES = max(1, int(os.getenv("MEDIA_IMAGE_UPLOAD_MAX_BYTES", str(20 * 1024 * 1024))))
 
 
 def resolve_gemini_model_name(model_name: str) -> str:
-    cleaned = str(model_name or "").strip()
+    cleaned = normalize_configured_gemini_model_name(model_name)
     return GEMINI_RUNTIME_MODEL_ALIASES.get(cleaned, cleaned)
 
-ALLOWED_ORIGINS = [origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "*").split(",") if origin.strip()]
-SITE_BASE_URL = os.getenv("SITE_BASE_URL", "http://127.0.0.1:4173").rstrip("/")
+SITE_BASE_URL = os.getenv("SITE_BASE_URL", "" if IS_PRODUCTION else "http://127.0.0.1:4173").rstrip("/")
+_DEFAULT_ALLOWED_ORIGINS = "" if IS_PRODUCTION else "*"
+_RAW_ALLOWED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", _DEFAULT_ALLOWED_ORIGINS).split(",")
+    if origin.strip()
+]
+if IS_PRODUCTION and ("*" in _RAW_ALLOWED_ORIGINS):
+    ALLOWED_ORIGINS = [SITE_BASE_URL] if SITE_BASE_URL else []
+else:
+    ALLOWED_ORIGINS = _RAW_ALLOWED_ORIGINS or ([] if IS_PRODUCTION else ["*"])
+VALID_AUTH_BACKENDS = {"auto", "cas", "dual", "supabase"}
+AUTH_BACKEND = os.getenv("AUTH_BACKEND", "auto").strip().lower() or "auto"
+if AUTH_BACKEND not in VALID_AUTH_BACKENDS:
+    raise RuntimeError(f"AUTH_BACKEND must be one of {sorted(VALID_AUTH_BACKENDS)}, got {AUTH_BACKEND!r}.")
+ALLOW_LEGACY_SUPABASE_AUTH = os.getenv("ALLOW_LEGACY_SUPABASE_AUTH", "0").strip() == "1"
+if IS_PRODUCTION and AUTH_BACKEND in {"supabase", "dual"} and not ALLOW_LEGACY_SUPABASE_AUTH:
+    raise RuntimeError(
+        "AUTH_BACKEND=supabase/dual is disabled in production unless "
+        "ALLOW_LEGACY_SUPABASE_AUTH=1 is set for a controlled rollback."
+    )
+CAS_ENABLED = os.getenv("CAS_ENABLED", "0").strip() == "1" or AUTH_BACKEND in {"cas", "dual"}
+CAS_SERVER_URL = os.getenv("CAS_SERVER_URL", os.getenv("CAS_URL", "")).strip().rstrip("/")
+CAS_CALLBACK_PATH = os.getenv("CAS_CALLBACK_PATH", "/api/auth/cas/callback").strip() or "/api/auth/cas/callback"
+CAS_FRONTEND_CALLBACK_PATH = os.getenv("CAS_FRONTEND_CALLBACK_PATH", "/login/cas-callback").strip() or "/login/cas-callback"
+CAS_SERVICE_BASE_URL = os.getenv("CAS_SERVICE_BASE_URL", SITE_BASE_URL).strip().rstrip("/")
+CAS_SERVICE_URL = os.getenv("CAS_SERVICE_URL", "").strip() or (
+    f"{CAS_SERVICE_BASE_URL}{CAS_CALLBACK_PATH}" if CAS_SERVICE_BASE_URL else ""
+)
+CAS_VALIDATE_TIMEOUT_SECONDS = float(os.getenv("CAS_VALIDATE_TIMEOUT_SECONDS", os.getenv("CAS_TIMEOUT_SECONDS", "8")))
+CAS_SESSION_TTL_SECONDS = max(300, int(os.getenv("CAS_SESSION_TTL_SECONDS", str(8 * 3600))))
+CAS_SESSION_RETENTION_DAYS = max(1, int(os.getenv("CAS_SESSION_RETENTION_DAYS", "30")))
+CAS_ADMIN_EMPLOYEE_NUMBERS = {
+    item.strip()
+    for item in os.getenv("CAS_ADMIN_EMPLOYEE_NUMBERS", "").split(",")
+    if item.strip()
+}
+CAS_ADMIN_USERNAMES = {
+    item.strip().lower()
+    for item in os.getenv("CAS_ADMIN_USERNAMES", "").split(",")
+    if item.strip()
+}
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "").strip()
 SUPABASE_AUTH_TIMEOUT_SECONDS = float(os.getenv("SUPABASE_AUTH_TIMEOUT_SECONDS", "8"))
 ADMIN_EMAILS = {item.strip().lower() for item in os.getenv("ADMIN_EMAILS", "").split(",") if item.strip()}
-DEV_AUTH_ENABLED = os.getenv("DEV_AUTH_ENABLED", "0").strip() == "1"
+DEV_AUTH_ENABLED = (not IS_PRODUCTION) and os.getenv("DEV_AUTH_ENABLED", "0").strip() == "1"
 SUPABASE_AUTH_ENABLED = bool(SUPABASE_URL and SUPABASE_ANON_KEY)
-PREVIEW_AUTH_ENABLED = DEV_AUTH_ENABLED or not SUPABASE_AUTH_ENABLED
+PREVIEW_AUTH_ENABLED = IS_DEVELOPMENT_LIKE and (DEV_AUTH_ENABLED or not SUPABASE_AUTH_ENABLED)
 PAYMENTS_ENABLED = os.getenv("PAYMENTS_ENABLED", "0").strip() == "1"
 PAYMENT_PROVIDER = os.getenv("PAYMENT_PROVIDER", "mock")
 

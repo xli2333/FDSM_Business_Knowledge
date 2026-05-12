@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { fetchAuthStatus, loginWithPassword } from '../api/index.js'
+import { clearCasAuthToken, fetchAuthStatus, getCasAuthToken, loginWithPassword } from '../api/index.js'
 import { useLanguage } from '../i18n/LanguageContext.js'
 import AuthDialog from './AuthDialog.jsx'
 import { AuthContext } from './AuthContext.js'
@@ -86,6 +86,25 @@ export function AuthProvider({ children }) {
       setBusinessProfile(payload.business_profile || GUEST_BUSINESS_PROFILE)
       setRoleHomePath(payload.role_home_path || payload.business_profile?.role_home_path || '/')
       setAuthMode(payload.auth_mode || 'password')
+      if (payload.user?.id) {
+        const account = {
+          user_id: payload.user.id,
+          email: payload.user.email || payload.business_profile?.email || '',
+          display_name: payload.business_profile?.display_name || '',
+          tier: payload.membership?.tier || 'free_member',
+        }
+        setUser(buildLocalUser(account))
+        setSession({
+          access_token: getCasAuthToken(),
+          user: {
+            id: account.user_id,
+            email: account.email || null,
+          },
+        })
+      } else if (!loadDebugAuth()) {
+        setUser(null)
+        setSession(null)
+      }
       return payload
     } catch {
       setBackendAuthEnabled(false)
@@ -148,6 +167,7 @@ export function AuthProvider({ children }) {
 
   const signOut = () => {
     clearDebugAuth()
+    clearCasAuthToken()
     setSession(null)
     setUser(null)
     setMembership(GUEST_MEMBERSHIP)

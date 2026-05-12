@@ -4,7 +4,14 @@ from functools import lru_cache
 
 import requests
 
-from backend.config import PREVIEW_AUTH_ENABLED, SUPABASE_ANON_KEY, SUPABASE_AUTH_ENABLED, SUPABASE_AUTH_TIMEOUT_SECONDS, SUPABASE_URL
+from backend.config import (
+    IS_DEVELOPMENT_LIKE,
+    PREVIEW_AUTH_ENABLED,
+    SUPABASE_ANON_KEY,
+    SUPABASE_AUTH_ENABLED,
+    SUPABASE_AUTH_TIMEOUT_SECONDS,
+    SUPABASE_URL,
+)
 
 
 def is_supabase_auth_enabled() -> bool:
@@ -28,7 +35,7 @@ def _user_endpoint() -> str:
 
 
 def _build_debug_user(debug_user_id: str | None, debug_user_email: str | None) -> dict | None:
-    if not PREVIEW_AUTH_ENABLED or not debug_user_id:
+    if not IS_DEVELOPMENT_LIKE or not PREVIEW_AUTH_ENABLED or not debug_user_id:
         return None
     user_id = debug_user_id.strip()
     if not user_id:

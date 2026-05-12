@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, File, Form, Header, UploadFile
+from fastapi import APIRouter, File, Form, Header, Query, Response, UploadFile
 
 from backend.models.schemas import (
     MediaAdminListResponse,
@@ -17,16 +17,18 @@ from backend.services.media_service import (
     generate_media_copy,
     get_admin_media_item,
     get_media_item_detail,
+    get_media_stream_target,
     list_admin_media_items,
     list_media_items,
     open_published_media_edit_draft,
     publish_media_item,
     rewrite_media_chapters,
+    unpublish_media_item_to_draft,
     update_media_item,
     upload_media_asset,
 )
 from backend.services.membership_service import get_membership_profile, require_admin_profile
-from backend.services.supabase_auth_service import get_authenticated_user
+from backend.services.auth_service import get_authenticated_user
 
 router = APIRouter(prefix="/api/media", tags=["media"])
 
@@ -74,6 +76,17 @@ def media_admin_edit_published_item(
 ):
     _require_media_admin(authorization, x_debug_user_id, x_debug_user_email)
     return open_published_media_edit_draft(media_item_id)
+
+
+@router.delete("/admin/published-items/{media_item_id}", response_model=MediaItemDetail)
+def media_admin_unpublish_published_item(
+    media_item_id: int,
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    _require_media_admin(authorization, x_debug_user_id, x_debug_user_email)
+    return unpublish_media_item_to_draft(media_item_id)
 
 
 @router.get("/admin/items/{media_id}", response_model=MediaItemDetail)
@@ -174,6 +187,36 @@ async def media_admin_upload(
         content_type=file.content_type,
         draft_id=draft_id,
         duration_seconds=duration_seconds,
+    )
+
+
+@router.get("/{kind}/{slug}/stream")
+def media_public_stream(
+    kind: str,
+    slug: str,
+    token: str | None = Query(default=None),
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    clean_token = (token or "").strip()
+    effective_authorization = authorization or (f"Bearer {clean_token}" if clean_token else None)
+    user = get_authenticated_user(
+        effective_authorization,
+        debug_user_id=x_debug_user_id,
+        debug_user_email=x_debug_user_email,
+    )
+    membership = get_membership_profile(user)
+    target = get_media_stream_target(kind, slug, membership)
+    return Response(
+        content=b"",
+        media_type=target["content_type"],
+        headers={
+            "X-Accel-Redirect": target["x_accel_redirect"],
+            "Content-Disposition": f'inline; filename="{target["filename"]}"',
+            "Cache-Control": "private, max-age=300",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

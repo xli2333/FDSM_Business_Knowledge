@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+gunicorn
 pydantic
 langchain
 langchain-google-genai
@@ -9,3 +10,7 @@ google-genai
 python-multipart
 requests
 python-dotenv
+rank-bm25
+pillow
+redis
+sentry-sdk[fastapi]

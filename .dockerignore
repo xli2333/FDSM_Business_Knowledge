@@ -1,0 +1,52 @@
+# VCS and editor metadata
+.git
+.gitignore
+.github
+.claude
+.vscode
+.idea
+
+# Python caches and virtualenvs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+ENV/
+
+# Node caches and build outputs
+node_modules/
+frontend/node_modules/
+frontend/dist/
+pretext-main/node_modules/
+.npm/
+*.log
+
+# Local environment and secrets
+.env
+.env.*
+!.env.docker.example
+!.env.production.example
+
+# Large local runtime data: mount these through ./data in Docker
+*.db
+*.db-*
+data/
+audio/
+uploads/
+faiss_index/
+faiss_index_business/
+Fudan_Business_Knowledge_Data/
+Fudan_News_Data/
+Fudan_Wechat_Data/
+archive/
+qa/
+reports/
+_publish_clean/
+
+# Project side materials not needed by runtime images
+docs/
+project_materials/
+todo/
+pretext/
+pretext-main/

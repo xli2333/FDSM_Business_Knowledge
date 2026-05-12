@@ -1311,6 +1311,93 @@ def delete_editorial_article(editorial_id: int) -> dict:
         "deleted": True,
     }
 
+
+def _delete_live_article_relations(connection, article_id: int) -> None:
+    version_rows = connection.execute(
+        "SELECT id FROM article_versions WHERE article_id = ?",
+        (article_id,),
+    ).fetchall()
+    version_ids = [int(row["id"]) for row in version_rows]
+    if version_ids:
+        placeholders = ",".join("?" for _ in version_ids)
+        connection.execute(
+            f"DELETE FROM article_chunk_embeddings WHERE version_id IN ({placeholders})",
+            version_ids,
+        )
+        connection.execute(
+            f"DELETE FROM article_chunks WHERE version_id IN ({placeholders})",
+            version_ids,
+        )
+
+    connection.execute("DELETE FROM article_chunk_embeddings WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM article_chunks WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM ingestion_jobs WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM article_versions WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM article_ai_outputs WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM article_translations WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM user_saved_articles WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM article_reactions WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM article_view_events WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM user_knowledge_theme_articles WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM featured_articles WHERE article_id = ?", (article_id,))
+    connection.execute(
+        "DELETE FROM home_content_slots WHERE entity_type = 'article' AND entity_id = ?",
+        (article_id,),
+    )
+    connection.execute("UPDATE topics SET cover_article_id = NULL WHERE cover_article_id = ?", (article_id,))
+    connection.execute("DELETE FROM topic_articles WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM article_columns WHERE article_id = ?", (article_id,))
+    connection.execute("DELETE FROM article_tags WHERE article_id = ?", (article_id,))
+    connection.execute("UPDATE editorial_articles SET article_id = NULL WHERE article_id = ?", (article_id,))
+    connection.execute("UPDATE editorial_articles SET source_article_id = NULL WHERE source_article_id = ?", (article_id,))
+    connection.execute("DELETE FROM articles WHERE id = ?", (article_id,))
+    connection.execute(
+        """
+        UPDATE tags
+        SET article_count = (
+            SELECT COUNT(*)
+            FROM article_tags
+            WHERE tag_id = tags.id
+        )
+        """
+    )
+    connection.execute("DELETE FROM tags WHERE article_count <= 0")
+
+
+def unpublish_published_article_to_editorial_draft_box(article_id: int) -> dict:
+    draft = reopen_published_article_to_editorial_draft_box(article_id)
+    editorial_id = int(draft["id"])
+    timestamp = _now_iso()
+    with connection_scope() as connection:
+        article_row = connection.execute("SELECT id FROM articles WHERE id = ?", (article_id,)).fetchone()
+        if article_row is None:
+            raise HTTPException(status_code=404, detail="Source article not found")
+        _delete_live_article_relations(connection, article_id)
+        connection.execute(
+            """
+            UPDATE editorial_articles
+            SET article_id = NULL,
+                source_article_id = NULL,
+                status = 'draft',
+                draft_box_state = ?,
+                workflow_status = 'draft',
+                published_summary_html = NULL,
+                published_summary_html_en = NULL,
+                published_final_html = NULL,
+                published_final_html_en = NULL,
+                approved_at = NULL,
+                published_at = NULL,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (DRAFT_BOX_STATE_ACTIVE, timestamp, editorial_id),
+        )
+        connection.commit()
+
+    refresh_search_cache()
+    return get_editorial_article(editorial_id)
+
+
 def reopen_published_article_to_editorial_draft_box(article_id: int) -> dict:
     timestamp = _now_iso()
     editorial_id: int | None = None

@@ -5,8 +5,10 @@ from backend.services import ai_service
 
 
 def test_resolve_gemini_model_name_maps_flash_alias_to_preview():
+    assert resolve_gemini_model_name("gemini-3.0-flash") == "gemini-3-flash-preview"
     assert resolve_gemini_model_name("gemini-3-flash") == "gemini-3-flash-preview"
-    assert resolve_gemini_model_name("gemini-2.5-flash") == "gemini-2.5-flash"
+    assert resolve_gemini_model_name("gemini-2.5-flash") == "gemini-3-flash-preview"
+    assert resolve_gemini_model_name("gemini-2.5-pro") == "gemini-3-flash-preview"
 
 
 def test_build_llm_uses_runtime_model_alias(monkeypatch):
@@ -19,7 +21,7 @@ def test_build_llm_uses_runtime_model_alias(monkeypatch):
     monkeypatch.setattr(ai_service, "ChatGoogleGenerativeAI", fake_constructor)
     monkeypatch.setattr(ai_service, "get_gemini_api_keys", lambda: ("test-key",))
 
-    result = ai_service._build_llm("gemini-3-flash")
+    result = ai_service._build_llm("gemini-3.0-flash")
 
     assert result["model"] == "gemini-3-flash-preview"
     assert captured["google_api_key"] == "test-key"

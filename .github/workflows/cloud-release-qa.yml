@@ -1,0 +1,59 @@
+name: cloud-release-qa
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: development
+      REQUEST_LOG_JSON_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install backend dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.lock.txt
+      - name: Check backend dependency lock
+        run: python deploy/check_requirements_lock.py
+      - name: Compile backend and deployment scripts
+        run: python -m compileall backend deploy
+      - name: Run backend focused tests
+        run: python -m pytest backend/tests/test_auth_backend_resolution.py backend/tests/test_auth_membership_permissions.py backend/tests/test_media_service.py
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Audit all frontend dependencies
+        run: npm audit
+      - name: Audit production dependencies
+        run: npm audit --omit=dev
+      - name: Build frontend
+        run: npm run build
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate local Docker Compose config
+        run: docker compose --env-file .env.docker.example config >/dev/null
+      - name: Validate production Docker Compose config
+        run: docker compose --env-file .env.production.example -f docker-compose.prod.yml config >/dev/null
+      - name: Check deployment shell syntax
+        run: bash -n deploy/preflight.sh deploy/acceptance_check.sh deploy/bootstrap_https.sh deploy/blue_green_deploy.sh deploy/rollback_release.sh

@@ -168,9 +168,10 @@ async function main() {
     })
     await page.getByRole('button', { name: /^New draft$/i }).click()
     await page.locator('select[name="kind"]').selectOption('video')
+    await page.getByRole('button', { name: /^Upload video$/i }).waitFor({ state: 'visible', timeout: 20000 })
     await page.getByRole('button', { name: /^Upload script$/i }).waitFor({ state: 'visible', timeout: 20000 })
 
-    await page.locator('[data-upload-slot="media"]').setInputFiles({
+    await page.locator('[data-upload-slot="media-video"]').setInputFiles({
       name: 'round106-media.mp4',
       mimeType: 'video/mp4',
       buffer: Buffer.from('\x00\x00\x00\x18ftypmp42'),
@@ -386,6 +387,176 @@ async function main() {
       )
     })
     await page.screenshot({ path: path.join(OUTPUT_DIR, 'media_after_edit_again.png'), fullPage: true })
+
+    const publishedDeleteTitle = `Round106 Published Delete ${Date.now()}`
+    const publishedDeleteDraft = await fetchAdminJson('/api/media/admin/items', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        kind: 'video',
+        title: publishedDeleteTitle,
+        summary: '**节目摘要：** 用于验证正式视频删除后先退回草稿箱。',
+        publish_date: '2026-04-20',
+        duration_seconds: 128,
+        visibility: 'public',
+        media_url: '/media-uploads/video/media/round106-delete-published.mp4',
+        source_url: '/media-uploads/video/media/round106-delete-published.mp4',
+        body_markdown: '## 节目简介\n\n这条视频用于验证管理员删除正式内容后先进入草稿箱。\n\n### 核心看点\n\n- 正式页删除会先下线。\n- 草稿箱删除才是完全删除。',
+        script_markdown: '00:00 正式页删除\n00:42 草稿箱完全删除',
+        chapters: [
+          { timestamp_label: '00:00', timestamp_seconds: 0, title: '正式页删除先下线' },
+          { timestamp_label: '00:42', timestamp_seconds: 42, title: '草稿箱删除才完全删除' },
+        ],
+      }),
+    })
+    const publishedDelete = await fetchAdminJson(`/api/media/admin/items/${publishedDeleteDraft.id}/publish`, { method: 'POST' })
+    await openRoute(page, `/video/${publishedDelete.slug}`)
+    await page.getByRole('heading', { name: publishedDeleteTitle }).waitFor({ state: 'visible', timeout: 20000 })
+    const deletePublishedButton = page.getByRole('button', { name: /^Delete to drafts$/i })
+    let publishedDeleteDismissSeen = false
+    page.once('dialog', async (dialog) => {
+      publishedDeleteDismissSeen = /move it back to the draft box/.test(dialog.message())
+      await dialog.dismiss()
+    })
+    await deletePublishedButton.click()
+    await page.waitForTimeout(500)
+    if (!publishedDeleteDismissSeen) {
+      throw new Error(`Published delete did not show draft-box confirmation: ${publishedDeleteTitle}`)
+    }
+    const stillLiveResponse = await fetch(`${BACKEND_URL}/api/media/video/${encodeURIComponent(publishedDelete.slug)}`)
+    if (!stillLiveResponse.ok) {
+      throw new Error(`Published item was removed even after delete confirmation was dismissed: ${publishedDeleteTitle}`)
+    }
+    page.once('dialog', async (dialog) => {
+      if (!/move it back to the draft box/.test(dialog.message())) {
+        throw new Error(`Unexpected published delete confirmation copy: ${dialog.message()}`)
+      }
+      await dialog.accept()
+    })
+    await deletePublishedButton.click()
+    await page.waitForURL(/\/media-studio\?draft_id=\d+&unpublished=1/, { timeout: 20000 })
+    await page.getByText(/moved back to this draft box/i).waitFor({ state: 'visible', timeout: 20000 })
+    const hiddenAfterPublishedDelete = await fetch(`${BACKEND_URL}/api/media/video/${encodeURIComponent(publishedDelete.slug)}`)
+    if (hiddenAfterPublishedDelete.status !== 404) {
+      throw new Error(`Published item still appears after delete-to-drafts: ${publishedDeleteTitle}`)
+    }
+    const returnedDraftMatch = page.url().match(/[?&]draft_id=(\d+)/)
+    const returnedDraftId = returnedDraftMatch ? Number(returnedDraftMatch[1]) : 0
+    const returnedDraftList = await fetchAdminJson('/api/media/admin/items?kind=video&limit=80')
+    if (!returnedDraftId || !(returnedDraftList.items || []).some((item) => item.id === returnedDraftId && item.title === publishedDeleteTitle)) {
+      throw new Error(`Published delete did not return the item to draft box: ${publishedDeleteTitle}`)
+    }
+    await page.screenshot({ path: path.join(OUTPUT_DIR, 'media_published_deleted_to_draft.png'), fullPage: true })
+
+    const publishedAudioDeleteTitle = `Round106 Published Audio Delete ${Date.now()}`
+    const publishedAudioDeleteDraft = await fetchAdminJson('/api/media/admin/items', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        kind: 'audio',
+        title: publishedAudioDeleteTitle,
+        summary: '**节目摘要：** 用于验证正式音频删除后先退回草稿箱。',
+        publish_date: '2026-04-20',
+        duration_seconds: 128,
+        visibility: 'paid',
+        media_url: '/media-uploads/audio/media/round106-delete-published.mp3',
+        source_url: '/media-uploads/audio/media/round106-delete-published.mp3',
+        body_markdown: '## 节目简介\n\n这条音频用于验证管理员删除正式内容后先进入草稿箱。\n\n### 核心看点\n\n- 正式页删除会先下线。\n- 草稿箱删除才是完全删除。',
+        transcript_markdown: '00:00 正式页删除\n00:42 草稿箱完全删除',
+        chapters: [
+          { timestamp_label: '00:00', timestamp_seconds: 0, title: '正式页删除先下线' },
+          { timestamp_label: '00:42', timestamp_seconds: 42, title: '草稿箱删除才完全删除' },
+        ],
+      }),
+    })
+    const publishedAudioDelete = await fetchAdminJson(`/api/media/admin/items/${publishedAudioDeleteDraft.id}/publish`, { method: 'POST' })
+    await openRoute(page, `/audio/${publishedAudioDelete.slug}`)
+    await page.getByRole('heading', { name: publishedAudioDeleteTitle }).waitFor({ state: 'visible', timeout: 20000 })
+    const deletePublishedAudioButton = page.getByRole('button', { name: /^Delete to drafts$/i })
+    let publishedAudioDeleteDismissSeen = false
+    page.once('dialog', async (dialog) => {
+      publishedAudioDeleteDismissSeen = /move it back to the draft box/.test(dialog.message())
+      await dialog.dismiss()
+    })
+    await deletePublishedAudioButton.click()
+    await page.waitForTimeout(500)
+    if (!publishedAudioDeleteDismissSeen) {
+      throw new Error(`Published audio delete did not show draft-box confirmation: ${publishedAudioDeleteTitle}`)
+    }
+    const audioStillLiveResponse = await fetch(`${BACKEND_URL}/api/media/audio/${encodeURIComponent(publishedAudioDelete.slug)}`)
+    if (!audioStillLiveResponse.ok) {
+      throw new Error(`Published audio item was removed even after delete confirmation was dismissed: ${publishedAudioDeleteTitle}`)
+    }
+    page.once('dialog', async (dialog) => {
+      if (!/move it back to the draft box/.test(dialog.message())) {
+        throw new Error(`Unexpected published audio delete confirmation copy: ${dialog.message()}`)
+      }
+      await dialog.accept()
+    })
+    await deletePublishedAudioButton.click()
+    await page.waitForURL(/\/media-studio\?draft_id=\d+&unpublished=1/, { timeout: 20000 })
+    await page.getByText(/moved back to this draft box/i).waitFor({ state: 'visible', timeout: 20000 })
+    const hiddenAfterPublishedAudioDelete = await fetch(`${BACKEND_URL}/api/media/audio/${encodeURIComponent(publishedAudioDelete.slug)}`)
+    if (hiddenAfterPublishedAudioDelete.status !== 404) {
+      throw new Error(`Published audio item still appears after delete-to-drafts: ${publishedAudioDeleteTitle}`)
+    }
+    const returnedAudioDraftMatch = page.url().match(/[?&]draft_id=(\d+)/)
+    const returnedAudioDraftId = returnedAudioDraftMatch ? Number(returnedAudioDraftMatch[1]) : 0
+    const returnedAudioDraftList = await fetchAdminJson('/api/media/admin/items?kind=audio&limit=80')
+    if (
+      !returnedAudioDraftId ||
+      !(returnedAudioDraftList.items || []).some((item) => item.id === returnedAudioDraftId && item.title === publishedAudioDeleteTitle)
+    ) {
+      throw new Error(`Published audio delete did not return the item to draft box: ${publishedAudioDeleteTitle}`)
+    }
+    await page.screenshot({ path: path.join(OUTPUT_DIR, 'media_published_audio_deleted_to_draft.png'), fullPage: true })
+
+    const deleteTitle = `Round106 Delete Draft ${Date.now()}`
+    const deleteDraft = await fetchAdminJson('/api/media/admin/items', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        kind: 'video',
+        title: deleteTitle,
+        publish_date: '2026-04-20',
+      }),
+    })
+    await openRoute(page, `/media-studio?draft_id=${deleteDraft.id}`)
+    const deleteRow = page.locator(`[data-media-draft-row="${deleteDraft.id}"]`)
+    await deleteRow.waitFor({ state: 'visible', timeout: 20000 })
+    let dismissDialogSeen = false
+    page.once('dialog', async (dialog) => {
+      dismissDialogSeen = /Delete draft/.test(dialog.message())
+      await dialog.dismiss()
+    })
+    await deleteRow.locator('button[title="Delete draft"]').click()
+    await page.waitForTimeout(500)
+    if (!dismissDialogSeen) {
+      throw new Error(`Draft box delete did not show a confirmation dialog: ${deleteTitle}`)
+    }
+    const keptList = await fetchAdminJson('/api/media/admin/items?kind=video&limit=80')
+    if (!(keptList.items || []).some((item) => item.id === deleteDraft.id)) {
+      throw new Error(`Draft box delete removed draft even after confirmation was dismissed: ${deleteTitle}`)
+    }
+    page.once('dialog', async (dialog) => {
+      if (!/Delete draft/.test(dialog.message())) {
+        throw new Error(`Unexpected delete confirmation copy: ${dialog.message()}`)
+      }
+      await dialog.accept()
+    })
+    await deleteRow.locator('button[title="Delete draft"]').click()
+    await page.getByText(/^Draft deleted\.$/i).waitFor({ state: 'visible', timeout: 20000 })
+    const deleteList = await fetchAdminJson('/api/media/admin/items?kind=video&limit=80')
+    if ((deleteList.items || []).some((item) => item.id === deleteDraft.id)) {
+      throw new Error(`Draft box delete button did not remove draft: ${deleteTitle}`)
+    }
+    await page.screenshot({ path: path.join(OUTPUT_DIR, 'media_draft_deleted.png'), fullPage: true })
 
     await context.close()
     await browser.close()
