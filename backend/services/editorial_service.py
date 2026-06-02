@@ -790,7 +790,7 @@ def _build_publish_validation(article: dict[str, Any]) -> list[dict]:
     if not article.get("tags"):
         issues.append({"code": "missing_tags", "message": "至少保留一个标签后才能发布"})
     if not _normalize_column_slug(article.get("primary_column_slug")):
-        issues.append({"code": "missing_primary_column", "message": "请选择栏目"})
+        issues.append({"code": "missing_primary_column", "message": "请选择板块"})
     return issues
 
 
@@ -816,6 +816,10 @@ def _infer_column_slug(article: dict, tags: list[dict]) -> str:
             " ".join(tag["name"] for tag in tags),
         ]
     )
+    if any(token in haystack for token in ("课程", "课堂", "校友", "EMBA", "MBA", "招生", "毕业", "开学", "复旦管理案例课堂", "复旦科创案例工作坊", "FDSM CASE HOUR")):
+        return "fudan-classroom"
+    if any(token in haystack for token in ("案例报道", "案例研究", "复旦管理案例", "案例教学", "决策", "复盘", "商业模式", "公司治理")):
+        return "case-decisions"
     if any(token in haystack for token in ("研究", "论文", "学术", "案例教学")):
         return "research"
     if any(token in haystack for token in ("院长", "教授", "复旦", "管理学院")):

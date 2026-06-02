@@ -89,7 +89,7 @@ function UserKnowledgeThemePage() {
             defaultDescription: '把相关文章整理成一条长期学习主线，再从下面勾选当前要交给 AI 处理的那几篇。',
             openArticle: '打开文章',
             defaultSource: '文章',
-            columnLabel: '栏目',
+            columnLabel: '板块',
             selectedCount: '已选文章',
             selectAll: '一键全选',
             clearSelection: '清空',

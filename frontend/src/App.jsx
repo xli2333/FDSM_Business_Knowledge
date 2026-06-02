@@ -100,7 +100,14 @@ function App() {
           <Route path="/organization/:slug" element={<OrganizationPage />} />
           <Route path="/topic/:slug" element={<TopicPage />} />
           <Route path="/topics" element={<TopicsPage />} />
-          <Route path="/time-machine" element={<TimeMachinePage />} />
+          <Route
+            path="/time-machine"
+            element={
+              <ProtectedRoute>
+                <TimeMachinePage />
+              </ProtectedRoute>
+            }
+          />
           <Route
             path="/me/today-bookmark"
             element={

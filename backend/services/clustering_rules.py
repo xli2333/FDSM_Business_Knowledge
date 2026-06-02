@@ -50,6 +50,33 @@ INDUSTRY_TOPIC_SIGNALS = {
     "案例教学",
 }
 
+CASE_DECISION_SIGNALS = {
+    "案例",
+    "案例教学",
+    "案例报道",
+    "案例研究",
+    "决策",
+    "复盘",
+    "商业模式",
+    "公司治理",
+    "战略",
+}
+
+CLASSROOM_SIGNALS = {
+    "课程",
+    "课堂",
+    "校友",
+    "EMBA",
+    "MBA",
+    "教学",
+    "招生",
+    "毕业",
+    "开学",
+    "复旦管理案例课堂",
+    "复旦科创案例工作坊",
+    "FDSM CASE HOUR",
+}
+
 
 def _tag_name_set(tag_entries: Iterable[tuple[str, str, float]], category: str) -> set[str]:
     return {
@@ -70,8 +97,29 @@ def derive_column_slugs(
     topic_names = _tag_name_set(tag_entries, "topic")
     industry_names = _tag_name_set(tag_entries, "industry")
     fdsm_role_hits = {item for item in fdsm_hits if item in DEANS_VIEW_ROLE_SIGNALS}
+    haystack = " ".join(
+        item
+        for item in [
+            article_type or "",
+            series_or_column or "",
+            " ".join(topic_names),
+            " ".join(industry_names),
+        ]
+        if item
+    )
 
     columns: list[str] = []
+
+    has_classroom_signal = any(token in haystack for token in CLASSROOM_SIGNALS)
+    if has_classroom_signal:
+        columns.append("fudan-classroom")
+
+    has_case_signal = (
+        article_type in {"案例报道", "案例研究"}
+        or any(token in haystack for token in CASE_DECISION_SIGNALS)
+    )
+    if has_case_signal:
+        columns.append("case-decisions")
 
     is_research = article_type == "研究/论文解读" or "管理视野" in (series_or_column or "")
     if is_research:

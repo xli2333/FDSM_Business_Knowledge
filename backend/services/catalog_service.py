@@ -12,7 +12,7 @@ from threading import Lock
 
 from fastapi import HTTPException
 
-from backend.config import BUSINESS_DATA_DIR, DEFAULT_PAGE_SIZE, HOME_FEED_CACHE_TTL_SECONDS, MAX_PAGE_SIZE
+from backend.config import BUSINESS_DATA_DIR, COLUMN_DEFINITIONS, DEFAULT_PAGE_SIZE, HOME_FEED_CACHE_TTL_SECONDS, MAX_PAGE_SIZE
 from backend.database import connection_scope
 from backend.services import ai_service
 from backend.services.article_ai_output_service import (
@@ -46,10 +46,25 @@ from backend.services.article_visibility_service import is_hidden_low_value_arti
 
 _HOME_FEED_CACHE_LOCK = Lock()
 _HOME_FEED_CACHE: dict[str, tuple[float, dict]] = {}
+SECTION_COLUMN_SLUGS = tuple(str(item["slug"]) for item in COLUMN_DEFINITIONS)
+SECTION_COLUMN_SLUG_SET = set(SECTION_COLUMN_SLUGS)
+
+
+def clear_home_feed_cache(language: str | None = None) -> None:
+    with _HOME_FEED_CACHE_LOCK:
+        if language is None:
+            _HOME_FEED_CACHE.clear()
+            return
+        normalized_language = _normalize_home_feed_language(language)
+        _HOME_FEED_CACHE.pop(normalized_language, None)
 
 
 def _normalize_home_feed_language(language: str) -> str:
     return "en" if str(language or "").strip().lower() == "en" else "zh"
+
+
+def _section_column_placeholders() -> str:
+    return ",".join("?" for _ in SECTION_COLUMN_SLUGS)
 
 
 def _organization_slug(name: str) -> str:
@@ -738,15 +753,17 @@ def list_columns(language: str = "zh") -> list[dict]:
     normalized_language = "en" if str(language or "").strip().lower() == "en" else "zh"
     with connection_scope() as connection:
         rows = connection.execute(
-            """
+            f"""
             SELECT
                 c.id, c.name, c.slug, c.description, c.icon, c.accent_color,
                 COUNT(ac.article_id) AS article_count
             FROM columns c
             LEFT JOIN article_columns ac ON ac.column_id = c.id
+            WHERE c.slug IN ({_section_column_placeholders()})
             GROUP BY c.id
             ORDER BY c.sort_order ASC, c.name ASC
-            """
+            """,
+            SECTION_COLUMN_SLUGS,
         ).fetchall()
         return [localize_column_payload(dict(row), language=normalized_language) for row in rows]
 
@@ -758,6 +775,9 @@ def get_column_articles(
     language: str = "zh",
 ) -> dict:
     normalized_language = "en" if str(language or "").strip().lower() == "en" else "zh"
+    normalized_slug = str(slug or "").strip()
+    if normalized_slug not in SECTION_COLUMN_SLUG_SET:
+        raise HTTPException(status_code=404, detail="Column not found")
     safe_page = max(page, 1)
     safe_page_size = max(1, min(page_size, MAX_PAGE_SIZE))
     offset = (safe_page - 1) * safe_page_size
@@ -768,7 +788,7 @@ def get_column_articles(
             FROM columns
             WHERE slug = ?
             """,
-            (slug,),
+            (normalized_slug,),
         ).fetchone()
         if column is None:
             raise HTTPException(status_code=404, detail="Column not found")
@@ -781,7 +801,7 @@ def get_column_articles(
                 FROM article_columns ac
                 JOIN articles a ON a.id = ac.article_id
                 WHERE ac.column_id = ?
-                ORDER BY a.publish_date DESC, a.id DESC
+                ORDER BY ac.sort_order ASC, a.publish_date DESC, a.id DESC
                 """,
                 (column["id"],),
             ).fetchall()
@@ -802,7 +822,7 @@ def get_column_articles(
                 FROM article_columns ac
                 JOIN articles a ON a.id = ac.article_id
                 WHERE ac.column_id = ?
-                ORDER BY a.publish_date DESC, a.id DESC
+                ORDER BY ac.sort_order ASC, a.publish_date DESC, a.id DESC
                 LIMIT ? OFFSET ?
                 """,
                 (column["id"], safe_page_size, offset),
@@ -1295,7 +1315,11 @@ def _build_home_feed(language: str = "zh") -> dict:
         quick_tag_slugs = [str(item["entity_slug"]) for item in home_slots.get("quick_tags", []) if item.get("entity_slug")]
         topic_starter_slugs = [str(item["entity_slug"]) for item in home_slots.get("topic_starters", []) if item.get("entity_slug")]
         topic_square_slugs = [str(item["entity_slug"]) for item in home_slots.get("topic_square", []) if item.get("entity_slug")]
-        column_slugs = [str(item["entity_slug"]) for item in home_slots.get("column_navigation", []) if item.get("entity_slug")]
+        column_slugs = [
+            str(item["entity_slug"])
+            for item in home_slots.get("column_navigation", [])
+            if item.get("entity_slug") and str(item["entity_slug"]) in SECTION_COLUMN_SLUG_SET
+        ]
 
         latest_rows = connection.execute(
             """
@@ -1356,7 +1380,7 @@ def _build_home_feed(language: str = "zh") -> dict:
                     FROM article_columns ac
                     JOIN articles a ON a.id = ac.article_id
                     WHERE ac.column_id = ?
-                    ORDER BY a.publish_date DESC, a.id DESC
+                    ORDER BY ac.sort_order ASC, a.publish_date DESC, a.id DESC
                     LIMIT ?
                     """,
                     (column["id"], 8 if language == "en" else 3),

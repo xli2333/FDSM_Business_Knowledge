@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 
 from fastapi import HTTPException
 
+from backend.config import COLUMN_DEFINITIONS
 from backend.database import connection_scope
 from backend.services.article_ai_output_service import build_current_article_source_hash
 from backend.services.content_localization import (
@@ -30,6 +31,8 @@ DEFAULT_TRENDING_CONFIG = {
     "bookmark_weight": 6.0,
 }
 SUPPORTED_CONTENT_LANGUAGES = ("zh", "en")
+SECTION_COLUMN_SLUGS = tuple(str(item["slug"]) for item in COLUMN_DEFINITIONS)
+SECTION_COLUMN_SLUG_SET = set(SECTION_COLUMN_SLUGS)
 
 
 def _now_iso() -> str:
@@ -65,6 +68,24 @@ def _normalize_limit(limit: int, max_limit: int = 24) -> int:
 def _normalize_content_language(value: str | None) -> str:
     normalized = str(value or "").strip().lower()
     return "en" if normalized == "en" else "zh"
+
+
+def _normalize_section_column_slug(value: str | None) -> str:
+    slug = str(value or "").strip()
+    if slug not in SECTION_COLUMN_SLUG_SET:
+        raise HTTPException(status_code=404, detail="Column not found")
+    return slug
+
+
+def _normalize_topic_slug(value: str | None) -> str:
+    slug = str(value or "").strip()
+    if not slug:
+        raise HTTPException(status_code=400, detail="Topic slug is required")
+    return slug
+
+
+def _section_column_placeholders() -> str:
+    return ",".join("?" for _ in SECTION_COLUMN_SLUGS)
 
 
 def _load_json_object(raw: str | None) -> dict:
@@ -275,6 +296,8 @@ def _resolve_slot_item(connection, entity_type: str, entity_id: int | None, enti
 
     if entity_type == "column":
         if entity_slug:
+            if entity_slug not in SECTION_COLUMN_SLUG_SET:
+                return None
             row = connection.execute(
                 """
                 SELECT id, slug, name, description, icon
@@ -292,6 +315,8 @@ def _resolve_slot_item(connection, entity_type: str, entity_id: int | None, enti
                 """,
                 (entity_id,),
             ).fetchone()
+            if row and str(row["slug"]) not in SECTION_COLUMN_SLUG_SET:
+                return None
         else:
             row = None
         return _serialize_column_candidate(row, language=language) if row else None
@@ -457,11 +482,13 @@ def search_content_operation_candidates(entity_type: str, query: str = "", limit
 
         if normalized_type == "column":
             rows = connection.execute(
-                """
+                f"""
                 SELECT id, slug, name, description, icon
                 FROM columns
+                WHERE slug IN ({_section_column_placeholders()})
                 ORDER BY sort_order ASC, name ASC
-                """
+                """,
+                SECTION_COLUMN_SLUGS,
             ).fetchall()
             payload = []
             for row in rows:
@@ -546,6 +573,201 @@ def get_content_operations_state(language: str = "zh") -> dict:
             "windows": list(TRENDING_WINDOWS.keys()),
         },
     }
+
+
+def _serialize_admin_article_rows(connection, rows: list, *, language: str) -> list[dict]:
+    translation_map = _fetch_article_translation_map(connection, rows) if language == "en" else {}
+    payload = []
+    for row in rows:
+        candidate = _serialize_article_candidate(row, language=language, translation_map=translation_map)
+        if candidate:
+            payload.append(candidate)
+    return payload
+
+
+def _resolve_article_collection_item(connection, payload: dict, *, language: str) -> tuple[int, dict]:
+    entity_type = str(payload.get("entity_type") or "article").strip() or "article"
+    if entity_type != "article":
+        raise HTTPException(status_code=400, detail="Article collections only accept articles")
+
+    raw_id = payload.get("id")
+    entity_slug = str(payload.get("slug") or "").strip() or None
+    try:
+        entity_id = int(raw_id) if raw_id is not None else None
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid article id") from exc
+
+    if entity_id is not None:
+        row = connection.execute(
+            """
+            SELECT id, slug, title, publish_date, excerpt, main_topic, content, COALESCE(access_level, 'public') AS access_level
+            FROM articles
+            WHERE id = ?
+            """,
+            (entity_id,),
+        ).fetchone()
+    elif entity_slug:
+        row = connection.execute(
+            """
+            SELECT id, slug, title, publish_date, excerpt, main_topic, content, COALESCE(access_level, 'public') AS access_level
+            FROM articles
+            WHERE slug = ?
+            """,
+            (entity_slug,),
+        ).fetchone()
+    else:
+        raise HTTPException(status_code=400, detail="Article id or slug is required")
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="Selected article no longer exists")
+
+    translation_map = _fetch_article_translation_map(connection, [row]) if language == "en" else {}
+    serialized = _serialize_article_candidate(row, language=language, translation_map=translation_map)
+    if serialized is None:
+        raise HTTPException(status_code=404, detail="Selected article is not available for this language")
+    return int(row["id"]), serialized
+
+
+def _get_admin_section_column(connection, column_slug: str, *, language: str) -> tuple[object, dict]:
+    normalized_slug = _normalize_section_column_slug(column_slug)
+    row = connection.execute(
+        """
+        SELECT id, slug, name, description, icon
+        FROM columns
+        WHERE slug = ?
+        """,
+        (normalized_slug,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Column not found")
+    return row, _serialize_column_candidate(row, language=language)
+
+
+def _get_admin_topic(connection, topic_slug: str, *, language: str) -> tuple[object, dict]:
+    normalized_slug = _normalize_topic_slug(topic_slug)
+    row = connection.execute(
+        """
+        SELECT id, slug, title, description, type
+        FROM topics
+        WHERE slug = ? AND status = 'published'
+        """,
+        (normalized_slug,),
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    return row, _serialize_topic_candidate(row, language=language)
+
+
+def get_admin_column_articles(column_slug: str, *, language: str = "zh") -> dict:
+    normalized_language = _normalize_content_language(language)
+    with connection_scope() as connection:
+        column, target = _get_admin_section_column(connection, column_slug, language=normalized_language)
+        rows = connection.execute(
+            """
+            SELECT
+                a.id, a.slug, a.title, a.publish_date, a.excerpt,
+                a.main_topic, a.content, COALESCE(a.access_level, 'public') AS access_level
+            FROM article_columns ac
+            JOIN articles a ON a.id = ac.article_id
+            WHERE ac.column_id = ?
+            ORDER BY ac.sort_order ASC, a.publish_date DESC, a.id DESC
+            """,
+            (column["id"],),
+        ).fetchall()
+        items = _serialize_admin_article_rows(connection, rows, language=normalized_language)
+    return {"target": target, "language": normalized_language, "items": items}
+
+
+def update_admin_column_articles(column_slug: str, items: list[dict], *, language: str = "zh") -> dict:
+    normalized_language = _normalize_content_language(language)
+    with connection_scope() as connection:
+        column, _target = _get_admin_section_column(connection, column_slug, language=normalized_language)
+        existing_rows = connection.execute(
+            """
+            SELECT article_id, is_featured
+            FROM article_columns
+            WHERE column_id = ?
+            """,
+            (column["id"],),
+        ).fetchall()
+        featured_map = {int(row["article_id"]): int(row["is_featured"] or 0) for row in existing_rows}
+
+        normalized_items: list[tuple[int, int, int]] = []
+        seen_article_ids: set[int] = set()
+        for item in items:
+            article_id, _serialized = _resolve_article_collection_item(connection, item, language=normalized_language)
+            if article_id in seen_article_ids:
+                continue
+            seen_article_ids.add(article_id)
+            normalized_items.append((article_id, featured_map.get(article_id, 0), len(normalized_items)))
+
+        connection.execute("DELETE FROM article_columns WHERE column_id = ?", (column["id"],))
+        if normalized_items:
+            connection.executemany(
+                """
+                INSERT INTO article_columns (article_id, column_id, is_featured, sort_order)
+                VALUES (?, ?, ?, ?)
+                """,
+                [(article_id, column["id"], is_featured, sort_order) for article_id, is_featured, sort_order in normalized_items],
+            )
+        connection.commit()
+    return get_admin_column_articles(column_slug, language=normalized_language)
+
+
+def get_admin_topic_articles(topic_slug: str, *, language: str = "zh") -> dict:
+    normalized_language = _normalize_content_language(language)
+    with connection_scope() as connection:
+        topic, target = _get_admin_topic(connection, topic_slug, language=normalized_language)
+        rows = connection.execute(
+            """
+            SELECT
+                a.id, a.slug, a.title, a.publish_date, a.excerpt,
+                a.main_topic, a.content, COALESCE(a.access_level, 'public') AS access_level
+            FROM topic_articles ta
+            JOIN articles a ON a.id = ta.article_id
+            WHERE ta.topic_id = ?
+            ORDER BY ta.sort_order ASC, a.publish_date DESC, a.id DESC
+            """,
+            (topic["id"],),
+        ).fetchall()
+        items = _serialize_admin_article_rows(connection, rows, language=normalized_language)
+    return {"target": target, "language": normalized_language, "items": items}
+
+
+def update_admin_topic_articles(topic_slug: str, items: list[dict], *, language: str = "zh") -> dict:
+    normalized_language = _normalize_content_language(language)
+    with connection_scope() as connection:
+        topic, _target = _get_admin_topic(connection, topic_slug, language=normalized_language)
+        existing_rows = connection.execute(
+            """
+            SELECT article_id, editor_note
+            FROM topic_articles
+            WHERE topic_id = ?
+            """,
+            (topic["id"],),
+        ).fetchall()
+        note_map = {int(row["article_id"]): row["editor_note"] for row in existing_rows}
+
+        normalized_items: list[tuple[int, int, str | None]] = []
+        seen_article_ids: set[int] = set()
+        for item in items:
+            article_id, _serialized = _resolve_article_collection_item(connection, item, language=normalized_language)
+            if article_id in seen_article_ids:
+                continue
+            seen_article_ids.add(article_id)
+            normalized_items.append((article_id, len(normalized_items), note_map.get(article_id)))
+
+        connection.execute("DELETE FROM topic_articles WHERE topic_id = ?", (topic["id"],))
+        if normalized_items:
+            connection.executemany(
+                """
+                INSERT INTO topic_articles (topic_id, article_id, sort_order, editor_note)
+                VALUES (?, ?, ?, ?)
+                """,
+                [(topic["id"], article_id, sort_order, editor_note) for article_id, sort_order, editor_note in normalized_items],
+            )
+        connection.commit()
+    return get_admin_topic_articles(topic_slug, language=normalized_language)
 
 
 def update_content_operations_section(slot_key: str, items: list[dict], *, language: str = "zh") -> dict:

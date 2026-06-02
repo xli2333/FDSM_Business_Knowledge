@@ -68,12 +68,12 @@ function CommercialPage() {
   const capabilityCards = isEnglish
     ? [
         ['Institutional Knowledge Hub', 'A unified base for faculty insight, topic planning, knowledge search, and AI support.', <Building2 key="a" size={20} />],
-        ['Research & Teaching Support', 'Turn scattered articles into columns, tags, topics, and structured reading paths.', <Layers3 key="b" size={20} />],
+        ['Research & Teaching Support', 'Turn scattered articles into sections, tags, topics, and structured reading paths.', <Layers3 key="b" size={20} />],
         ['Membership Media Service', 'Run search, AI, audio, video, subscriptions, and lead capture in one system.', <Sparkles key="c" size={20} />],
       ]
     : [
         ['机构知识中枢', '统一承接教师观点、专题策划、知识检索和 AI 支持能力。', <Building2 key="a" size={20} />],
-        ['研究与教学支持', '把分散文章组织成栏目、标签、专题和结构化阅读路径。', <Layers3 key="b" size={20} />],
+        ['研究与教学支持', '把分散文章组织成板块、标签、专题和结构化阅读路径。', <Layers3 key="b" size={20} />],
         ['会员媒体服务', '在一个系统里管理搜索、AI、音视频、订阅和销售线索。', <Sparkles key="c" size={20} />],
       ]
 
@@ -108,7 +108,7 @@ function CommercialPage() {
   const cooperationBullets = isEnglish
     ? [
         'Suitable for school knowledge platforms, research libraries, brand content hubs, and executive education programs.',
-        'Can expand toward premium columns, course products, institution seats, and private deployment.',
+        'Can expand toward premium sections, course products, institution seats, and private deployment.',
         'Submitted information goes directly into the backend so follow-up discussions can begin immediately.',
       ]
     : [
@@ -133,7 +133,7 @@ function CommercialPage() {
                   </>
                 ) : (
                   <>
-                    让复旦商业知识库
+                    让复旦商业知识
                     <br />
                     进入会员服务与机构项目
                   </>

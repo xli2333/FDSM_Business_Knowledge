@@ -148,6 +148,34 @@ export function updateAdminContentSection(slotKey, payload, authToken = '', lang
   })
 }
 
+export function fetchAdminColumnArticles(columnSlug, authToken = '', language = 'zh') {
+  return request(`/admin/content-ops/columns/${encodeURIComponent(columnSlug)}/articles?language=${encodeURIComponent(language)}`, {
+    authToken,
+  })
+}
+
+export function updateAdminColumnArticles(columnSlug, payload, authToken = '', language = 'zh') {
+  return request(`/admin/content-ops/columns/${encodeURIComponent(columnSlug)}/articles?language=${encodeURIComponent(language)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+    authToken,
+  })
+}
+
+export function fetchAdminTopicArticles(topicSlug, authToken = '', language = 'zh') {
+  return request(`/admin/content-ops/topics/${encodeURIComponent(topicSlug)}/articles?language=${encodeURIComponent(language)}`, {
+    authToken,
+  })
+}
+
+export function updateAdminTopicArticles(topicSlug, payload, authToken = '', language = 'zh') {
+  return request(`/admin/content-ops/topics/${encodeURIComponent(topicSlug)}/articles?language=${encodeURIComponent(language)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+    authToken,
+  })
+}
+
 export function updateAdminTrendingConfig(payload, authToken = '') {
   return request('/admin/content-ops/trending', {
     method: 'PUT',

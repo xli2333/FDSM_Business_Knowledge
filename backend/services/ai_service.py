@@ -23,6 +23,7 @@ from backend.services.html_renderer import strip_markdown
 
 _GEMINI_TIMEOUT = (10, 90)
 _GEMINI_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+_GEMINI_KEY_FAILURE_STATUS = {401, 403}
 _gemini_request_counter = itertools.count()
 
 LAYOUT_MODE_GUIDANCE = {
@@ -151,6 +152,9 @@ def _request_gemini_text(
             response = session.post(url, json=payload, timeout=_GEMINI_TIMEOUT)
             if response.status_code == 200:
                 return _extract_gemini_text(response.json())
+            if response.status_code in _GEMINI_KEY_FAILURE_STATUS and len(api_keys) > 1 and attempt < len(api_keys) - 1:
+                last_error = RuntimeError(f"Gemini API error {response.status_code}: {response.text}")
+                continue
             if response.status_code in _GEMINI_RETRYABLE_STATUS:
                 last_error = RuntimeError(f"Gemini API error {response.status_code}: {response.text}")
                 time.sleep(min(4.0, 0.6 * (attempt + 1)))
@@ -1380,13 +1384,15 @@ def suggest_editorial_metadata(title: str, content: str) -> dict:
         '  "excerpt": "80-140 Chinese characters summary",\n'
         '  "article_type": "short type label",\n'
         '  "main_topic": "primary topic label",\n'
-        '  "column_slug": "insights|industry|research|deans-view",\n'
+        '  "column_slug": "deans-view|case-decisions|industry|insights|research|fudan-classroom",\n'
         '  "tags": [{"name": "tag name", "category": "topic|industry|type|entity", "confidence": 0.0}]\n'
         "}\n"
         "Use concise Chinese labels when possible.\n"
         "Prefer specific labels over generic ones.\n"
         "When the article clearly involves companies, people, products, regulators, or laws, keep their official names exactly.\n"
         "Cover multiple dimensions when supported by the text: topic, industry, and entity.\n"
+        "Column meanings: deans-view=复旦观点; case-decisions=案例决策; industry=产业圆桌; "
+        "insights=热点拆解; research=管理视野; fudan-classroom=复理学堂.\n"
         "Avoid weak tags such as 商业, 企业, 公司, 管理, 作者, 文章, 案例 unless the article is truly about that concept.\n"
         "Return 6 to 12 tags when the article contains enough signal, and return JSON only.\n\n"
         f"Title:\n{title}\n\n"

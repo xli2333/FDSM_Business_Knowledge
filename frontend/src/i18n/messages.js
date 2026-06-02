@@ -1,7 +1,7 @@
 export const messages = {
   zh: {
-    appName: '复旦商业知识库',
-    appSubtitle: 'Business-Only Knowledge Base',
+    appName: '复旦商业知识',
+    appSubtitle: 'Fudan Business Knowledge',
     pageLoading: '页面加载中...',
     navbar: {
       home: '首页',
@@ -11,7 +11,7 @@ export const messages = {
       insights: '洞察',
       industry: '行业',
       research: '研究',
-      deansView: '院长说',
+      deansView: '复旦观点',
       topics: '专题',
       organizations: '机构',
       following: '关注',
@@ -31,7 +31,7 @@ export const messages = {
       languageEn: 'EN',
     },
     footer: {
-      description: '复旦商业知识库汇集文章、专题、机构页面、搜索与 AI 助理服务，为商业阅读提供统一入口。',
+      description: '复旦商业知识汇集文章、专题、机构页面、搜索与 AI 助理服务，为商业阅读提供统一入口。',
       commercial: '预约演示 / 商务咨询',
     },
     article: {
@@ -94,8 +94,8 @@ export const messages = {
     },
   },
   en: {
-    appName: 'Fudan Business Knowledge Base',
-    appSubtitle: 'Business-Only Knowledge Base',
+    appName: 'Fudan Business Knowledge',
+    appSubtitle: 'Fudan Business Knowledge',
     pageLoading: 'Loading page...',
     navbar: {
       home: 'Home',
@@ -105,7 +105,7 @@ export const messages = {
       insights: 'Insights',
       industry: 'Industry',
       research: 'Research',
-      deansView: "Dean's View",
+      deansView: 'Fudan Viewpoints',
       topics: 'Topics',
       organizations: 'Organizations',
       following: 'Following',
@@ -125,7 +125,7 @@ export const messages = {
       languageEn: 'EN',
     },
     footer: {
-      description: 'Fudan Business Knowledge Base brings articles, topics, organization pages, search, and the AI assistant into one reading platform.',
+      description: 'Fudan Business Knowledge brings articles, topics, organization pages, search, and the AI assistant into one reading platform.',
       commercial: 'Book Demo / Business Inquiry',
     },
     article: {

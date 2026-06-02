@@ -9,6 +9,7 @@ from typing import Callable, TypeVar
 
 from backend.config import (
     BILLING_PLAN_DEFINITIONS,
+    COLUMN_DEFINITIONS,
     DATABASE_BACKEND,
     DATABASE_URL,
     DB_OBSERVABILITY_ENABLED,
@@ -234,6 +235,232 @@ def database_is_ready() -> bool:
 def _table_has_column(connection: sqlite3.Connection, table_name: str, column_name: str) -> bool:
     rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
     return any(row["name"] == column_name for row in rows)
+
+
+def _sync_section_columns(connection: sqlite3.Connection) -> None:
+    timestamp = datetime.now().replace(microsecond=0).isoformat()
+    for column in COLUMN_DEFINITIONS:
+        row = connection.execute(
+            "SELECT id FROM columns WHERE slug = ?",
+            (column["slug"],),
+        ).fetchone()
+        if row is None:
+            connection.execute(
+                """
+                INSERT INTO columns (name, slug, description, icon, sort_order, accent_color)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    column["name"],
+                    column["slug"],
+                    column["description"],
+                    column["icon"],
+                    column["sort_order"],
+                    column["accent_color"],
+                ),
+            )
+            continue
+        connection.execute(
+            """
+            UPDATE columns
+            SET name = ?,
+                description = ?,
+                icon = ?,
+                sort_order = ?,
+                accent_color = ?
+            WHERE slug = ?
+            """,
+            (
+                column["name"],
+                column["description"],
+                column["icon"],
+                column["sort_order"],
+                column["accent_color"],
+                column["slug"],
+            ),
+        )
+
+
+def _column_id_by_slug(connection: sqlite3.Connection, slug: str) -> int | None:
+    row = connection.execute("SELECT id FROM columns WHERE slug = ?", (slug,)).fetchone()
+    return int(row["id"]) if row else None
+
+
+def _insert_section_article_links(
+    connection: sqlite3.Connection,
+    *,
+    column_slug: str,
+    where_sql: str,
+    params: tuple,
+    limit: int,
+) -> int:
+    column_id = _column_id_by_slug(connection, column_slug)
+    if column_id is None:
+        return 0
+    connection.execute("DELETE FROM article_columns WHERE column_id = ?", (column_id,))
+    rows = connection.execute(
+        f"""
+        SELECT id
+        FROM articles
+        WHERE {where_sql}
+        ORDER BY publish_date DESC, id DESC
+        LIMIT ?
+        """,
+        (*params, limit),
+    ).fetchall()
+    inserted = 0
+    for sort_order, row in enumerate(rows, start=1):
+        cursor = connection.execute(
+            """
+            INSERT OR IGNORE INTO article_columns (article_id, column_id, is_featured, sort_order)
+            VALUES (?, ?, 0, ?)
+            """,
+            (row["id"], column_id, sort_order),
+        )
+        inserted += int(cursor.rowcount > 0)
+    return inserted
+
+
+def _sync_section_article_links(connection: sqlite3.Connection) -> None:
+    text_fields = (
+        "COALESCE(title, '') || ' ' || "
+        "COALESCE(main_topic, '') || ' ' || "
+        "COALESCE(article_type, '') || ' ' || "
+        "COALESCE(series_or_column, '') || ' ' || "
+        "COALESCE(tag_text, '')"
+    )
+    text_expr = f"({text_fields})"
+    _insert_section_article_links(
+        connection,
+        column_slug="case-decisions",
+        where_sql=f"""
+            (
+                COALESCE(series_or_column, '') LIKE ?
+                OR article_type IN (?)
+                OR {text_expr} LIKE ?
+                OR {text_expr} LIKE ?
+                OR (
+                    {text_expr} LIKE ?
+                    AND (
+                        {text_expr} LIKE ?
+                        OR {text_expr} LIKE ?
+                        OR {text_expr} LIKE ?
+                        OR {text_expr} LIKE ?
+                        OR {text_expr} LIKE ?
+                    )
+                )
+            )
+            AND COALESCE(series_or_column, '') NOT LIKE ?
+        """,
+        params=(
+            "%复旦管理案例%",
+            "案例研究",
+            "%复旦管理案例%",
+            "%商业创新案例%",
+            "%案例%",
+            "%决策%",
+            "%复盘%",
+            "%商业模式%",
+            "%公司治理%",
+            "%战略%",
+            "%MI·跨界%",
+        ),
+        limit=24,
+    )
+    _insert_section_article_links(
+        connection,
+        column_slug="fudan-classroom",
+        where_sql=f"""
+            (
+                {text_expr} LIKE ?
+                OR {text_expr} LIKE ?
+                OR {text_expr} LIKE ?
+                OR {text_expr} LIKE ?
+                OR {text_expr} LIKE ?
+                OR {text_expr} LIKE ?
+                OR {text_expr} LIKE ?
+                OR {text_expr} LIKE ?
+                OR (
+                    {text_expr} LIKE ?
+                    AND (
+                        {text_expr} LIKE ?
+                        OR {text_expr} LIKE ?
+                        OR {text_expr} LIKE ?
+                    )
+                )
+                OR (
+                    {text_expr} LIKE ?
+                    AND (
+                        {text_expr} LIKE ?
+                        OR {text_expr} LIKE ?
+                        OR {text_expr} LIKE ?
+                        OR {text_expr} LIKE ?
+                    )
+                )
+            )
+        """,
+        params=(
+            "%复旦管理案例课堂%",
+            "%复旦科创案例工作坊%",
+            "%FDSM CASE HOUR%",
+            "%案例午餐会%",
+            "%商学院课堂%",
+            "%全球商学院课堂%",
+            "%课程项目%",
+            "%学习路径%",
+            "%课程%",
+            "%复旦管院%",
+            "%复旦大学管理学院%",
+            "%项目%",
+            "%校友%",
+            "%学习%",
+            "%课堂%",
+            "%课程%",
+            "%项目%",
+        ),
+        limit=12,
+    )
+
+
+def _sync_section_home_navigation(connection: sqlite3.Connection) -> None:
+    timestamp = datetime.now().replace(microsecond=0).isoformat()
+    connection.execute("DELETE FROM home_content_slots WHERE slot_key = 'column_navigation'")
+    languages = ("zh", "en") if _table_has_column(connection, "home_content_slots", "language") else ("zh",)
+    rows = []
+    for language in languages:
+        for index, column in enumerate(COLUMN_DEFINITIONS):
+            rows.append(
+                (
+                    language,
+                    "column_navigation",
+                    "column",
+                    None,
+                    column["slug"],
+                    index,
+                    1,
+                    "{}",
+                    timestamp,
+                    timestamp,
+                )
+            )
+    connection.executemany(
+        """
+        INSERT INTO home_content_slots (
+            language,
+            slot_key,
+            entity_type,
+            entity_id,
+            entity_slug,
+            sort_order,
+            is_active,
+            metadata_json,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
 
 
 def ensure_database_ready(force_rebuild: bool = False) -> None:
@@ -1069,6 +1296,8 @@ def ensure_runtime_tables() -> None:
             ON home_content_slots(language, slot_key, is_active, sort_order ASC, id ASC)
             """
         )
+        _sync_section_columns(connection)
+        _sync_section_article_links(connection)
         if not _table_has_column(connection, "editorial_articles", "translation_error"):
             connection.execute("ALTER TABLE editorial_articles ADD COLUMN translation_error TEXT")
         if not _table_has_column(connection, "editorial_articles", "translation_model"):
@@ -1465,6 +1694,7 @@ def ensure_runtime_tables() -> None:
                     """,
                     slot_seed_rows,
                 )
+        _sync_section_home_navigation(connection)
         trending_config_count = connection.execute("SELECT COUNT(*) AS total FROM home_trending_config").fetchone()["total"]
         if trending_config_count == 0:
             connection.execute(

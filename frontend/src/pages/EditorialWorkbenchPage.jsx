@@ -66,10 +66,12 @@ const EMPTY_PREVIEW = `<!doctype html>
 </html>`
 
 const DEFAULT_COLUMNS = [
-  { slug: 'insights', name: '深度洞察' },
-  { slug: 'industry', name: '行业观察' },
-  { slug: 'research', name: '学术前沿' },
-  { slug: 'deans-view', name: '院长说' },
+  { slug: 'deans-view', name: '复旦观点' },
+  { slug: 'case-decisions', name: '案例决策' },
+  { slug: 'industry', name: '产业圆桌' },
+  { slug: 'insights', name: '热点拆解' },
+  { slug: 'research', name: '管理视野' },
+  { slug: 'fudan-classroom', name: '复理学堂' },
 ]
 
 const DEFAULT_FORM = {
@@ -797,8 +799,8 @@ function EditorialWorkbenchPage() {
             </h1>
             <p className="mt-5 max-w-3xl text-base leading-8 text-white/84">
               {isEnglish
-                ? 'This workbench keeps only the in-site workflow: raw draft, AI auto layout, tag confirmation, column confirmation, save, and publish.'
-                : '这版编辑台只保留站内发布流程：原稿、AI 自动排版、标签确认、栏目确认、保存和发布。'}
+                ? 'This workbench keeps only the in-site workflow: raw draft, AI auto layout, tag confirmation, section confirmation, save, and publish.'
+                : '这版编辑台只保留站内发布流程：原稿、AI 自动排版、标签确认、板块确认、保存和发布。'}
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
               <button
@@ -1338,15 +1340,15 @@ function EditorialWorkbenchPage() {
 
             <div className="space-y-6">
               <div className="fudan-panel p-6">
-                <div className="section-kicker">{isEnglish ? 'Column' : '栏目确认'}</div>
+                <div className="section-kicker">{isEnglish ? 'Section' : '板块确认'}</div>
                 <div className="mt-2 text-sm text-slate-500">
                   {detail?.primary_column_manual
                     ? isEnglish
-                      ? 'Current column is manually confirmed.'
-                      : '当前栏目为人工指定。'
+                      ? 'Current section is manually confirmed.'
+                      : '当前板块为人工指定。'
                     : isEnglish
-                      ? 'Current column follows the AI suggestion.'
-                      : '当前栏目跟随 AI 建议。'}
+                      ? 'Current section follows the AI suggestion.'
+                      : '当前板块跟随 AI 建议。'}
                 </div>
                 <select
                   name="primary_column_slug"
@@ -1360,7 +1362,7 @@ function EditorialWorkbenchPage() {
                   }
                   className="mt-4 w-full rounded-[1.1rem] border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none"
                 >
-                  <option value="">{isEnglish ? 'Select a column' : '选择栏目'}</option>
+                  <option value="">{isEnglish ? 'Select a section' : '选择板块'}</option>
                   {columns.map((item) => (
                     <option key={item.slug} value={item.slug}>
                       {item.name || item.slug}

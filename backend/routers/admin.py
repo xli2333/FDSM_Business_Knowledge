@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Header
 
 from backend.models.schemas import (
+    AdminArticleCollectionResponse,
+    AdminArticleCollectionUpdateRequest,
     AdminContentEntity,
     AdminContentOperationsResponse,
     AdminOverviewResponse,
@@ -16,9 +18,14 @@ from backend.models.schemas import (
     RagAdminOverviewResponse,
 )
 from backend.services.billing_service import list_billing_orders
+from backend.services.catalog_service import clear_home_feed_cache
 from backend.services.content_operations_service import (
+    get_admin_column_articles,
+    get_admin_topic_articles,
     get_content_operations_state,
     search_content_operation_candidates,
+    update_admin_column_articles,
+    update_admin_topic_articles,
     update_content_operations_section,
     update_trending_config as save_trending_config,
 )
@@ -176,7 +183,83 @@ def admin_update_content_operations_section(
         debug_user_email=x_debug_user_email,
     )
     require_admin_profile(user)
-    return update_content_operations_section(slot_key, [item.model_dump() for item in payload.items], language=language)
+    response = update_content_operations_section(slot_key, [item.model_dump() for item in payload.items], language=language)
+    clear_home_feed_cache(language)
+    return response
+
+
+@router.get("/content-ops/columns/{column_slug}/articles", response_model=AdminArticleCollectionResponse)
+def admin_content_operations_column_articles(
+    column_slug: str,
+    language: str = "zh",
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    user = get_authenticated_user(
+        authorization,
+        debug_user_id=x_debug_user_id,
+        debug_user_email=x_debug_user_email,
+    )
+    require_admin_profile(user)
+    return get_admin_column_articles(column_slug, language=language)
+
+
+@router.put("/content-ops/columns/{column_slug}/articles", response_model=AdminArticleCollectionResponse)
+def admin_update_content_operations_column_articles(
+    column_slug: str,
+    payload: AdminArticleCollectionUpdateRequest,
+    language: str = "zh",
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    user = get_authenticated_user(
+        authorization,
+        debug_user_id=x_debug_user_id,
+        debug_user_email=x_debug_user_email,
+    )
+    require_admin_profile(user)
+    response = update_admin_column_articles(column_slug, [item.model_dump() for item in payload.items], language=language)
+    clear_home_feed_cache(language)
+    return response
+
+
+@router.get("/content-ops/topics/{topic_slug}/articles", response_model=AdminArticleCollectionResponse)
+def admin_content_operations_topic_articles(
+    topic_slug: str,
+    language: str = "zh",
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    user = get_authenticated_user(
+        authorization,
+        debug_user_id=x_debug_user_id,
+        debug_user_email=x_debug_user_email,
+    )
+    require_admin_profile(user)
+    return get_admin_topic_articles(topic_slug, language=language)
+
+
+@router.put("/content-ops/topics/{topic_slug}/articles", response_model=AdminArticleCollectionResponse)
+def admin_update_content_operations_topic_articles(
+    topic_slug: str,
+    payload: AdminArticleCollectionUpdateRequest,
+    language: str = "zh",
+    authorization: str | None = Header(default=None),
+    x_debug_user_id: str | None = Header(default=None, alias="X-Debug-User-Id"),
+    x_debug_user_email: str | None = Header(default=None, alias="X-Debug-User-Email"),
+):
+    user = get_authenticated_user(
+        authorization,
+        debug_user_id=x_debug_user_id,
+        debug_user_email=x_debug_user_email,
+    )
+    require_admin_profile(user)
+    response = update_admin_topic_articles(topic_slug, [item.model_dump() for item in payload.items], language=language)
+    clear_home_feed_cache(language)
+    return response
 
 
 @router.put("/content-ops/trending", response_model=AdminTrendingConfig)

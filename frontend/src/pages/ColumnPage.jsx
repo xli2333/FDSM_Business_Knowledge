@@ -65,7 +65,7 @@ function ColumnPage() {
   }
 
   if (!data) {
-    return <div className="page-shell py-16 text-sm text-slate-500">{isEnglish ? 'Loading column...' : '栏目加载中...'}</div>
+    return <div className="page-shell py-16 text-sm text-slate-500">{isEnglish ? 'Loading section...' : '板块加载中...'}</div>
   }
 
   return (
@@ -73,7 +73,7 @@ function ColumnPage() {
       <div className="fudan-panel p-8 md:p-10">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
-            <div className="section-kicker">{isEnglish ? 'Column channel' : '栏目频道'}</div>
+            <div className="section-kicker">{isEnglish ? 'Section channel' : '板块频道'}</div>
             <h1 className="section-title">{data.column.name}</h1>
             <p className="mt-4 max-w-3xl text-base leading-8 text-slate-600">{data.column.description}</p>
           </div>
@@ -83,7 +83,7 @@ function ColumnPage() {
             className="inline-flex items-center gap-2 rounded-full border border-fudan-blue/20 bg-fudan-blue/10 px-5 py-3 text-sm font-semibold text-fudan-blue transition hover:bg-fudan-blue/15"
           >
             {isFollowing ? <BellRing size={16} /> : <BellPlus size={16} />}
-            {isFollowing ? (isEnglish ? 'Following column' : '已关注栏目') : isEnglish ? 'Follow column' : '关注栏目'}
+            {isFollowing ? (isEnglish ? 'Following section' : '已关注板块') : isEnglish ? 'Follow section' : '关注板块'}
           </button>
         </div>
       </div>

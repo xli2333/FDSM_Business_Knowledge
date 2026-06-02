@@ -109,7 +109,7 @@ function LoginPage() {
           <div className="bg-[linear-gradient(135deg,rgba(13,7,131,0.98),rgba(10,5,96,0.84)_56%,rgba(234,107,0,0.24))] px-7 py-10 text-white md:px-10 md:py-12">
             <div className="section-kicker !text-white/70">{isEnglish ? 'Login' : '登录'}</div>
             <h1 className="font-serif text-4xl font-black leading-tight text-white md:text-6xl">
-              {isEnglish ? 'Sign in to Fudan Business Knowledge Base' : '登录复旦商业知识库'}
+              {isEnglish ? 'Sign in to Fudan Business Knowledge' : '登录复旦商业知识'}
             </h1>
             <p className="mt-5 max-w-3xl text-base leading-8 text-white/84">
               {isEnglish

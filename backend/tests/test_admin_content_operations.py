@@ -13,6 +13,8 @@ from backend.database import connection_scope, ensure_runtime_tables
 from backend.main import app
 from backend.routers import admin as admin_router
 from backend.routers import editorial as editorial_router
+from backend.routers import topics as topics_router
+from backend.services import ai_service, editorial_service
 from backend.services.article_ai_output_service import build_current_article_source_hash
 
 SOURCE_DB_PATH = Path(__file__).resolve().parents[2] / "fudan_knowledge_base.db"
@@ -32,6 +34,46 @@ def _allow_admin_access(monkeypatch):
         lambda authorization, debug_user_id=None, debug_user_email=None: admin_user,
     )
     monkeypatch.setattr(editorial_router, "require_admin_profile", lambda user: {"is_admin": True})
+    monkeypatch.setattr(
+        editorial_service,
+        "sync_article_for_rag",
+        lambda article_id, trigger_source="manual", force=False: {
+            "job": None,
+            "version": None,
+            "skipped": True,
+            "article_id": article_id,
+            "trigger_source": trigger_source,
+            "force": force,
+        },
+    )
+    monkeypatch.setattr(
+        editorial_service,
+        "render_fudan_wechat",
+        lambda item, timeout_seconds=60.0: {
+            "previewHtml": f"<div><h1>{item.get('title') or 'Editorial'}</h1><p>Rendered for test.</p></div>",
+            "contentHtml": f"<div><h1>{item.get('title') or 'Editorial'}</h1><p>Rendered for test.</p></div>",
+            "renderPlan": {"layout": "test"},
+            "metadata": {"engine": "test"},
+            "warnings": [],
+        },
+    )
+    monkeypatch.setattr(
+        ai_service,
+        "translate_editorial_assets_to_english",
+        lambda title, excerpt, summary_markdown, content_markdown: {
+            "title": f"{title} EN",
+            "excerpt": excerpt or "English excerpt",
+            "summary": summary_markdown or "English summary",
+            "content": content_markdown or "English content",
+            "model": "gemini-3-flash-preview",
+        },
+    )
+    monkeypatch.setattr(
+        topics_router,
+        "get_authenticated_user",
+        lambda authorization, debug_user_id=None, debug_user_email=None: admin_user,
+    )
+    monkeypatch.setattr(topics_router, "require_paid_profile", lambda user: {"can_access_paid": True})
 
 
 @pytest.fixture()
@@ -498,6 +540,110 @@ def test_admin_content_operation_article_candidates_filter_and_localize_for_engl
     assert all(item["id"] != untranslated_article_id for item in payload)
 
 
+def test_admin_column_article_collection_manages_public_section_membership_and_order(client):
+    first_article_id = _insert_article(
+        title="Admin Section First",
+        slug="admin-section-first",
+        publish_date="2099-05-01",
+    )
+    second_article_id = _insert_article(
+        title="Admin Section Second",
+        slug="admin-section-second",
+        publish_date="2099-05-02",
+    )
+
+    update_response = client.put(
+        "/api/admin/content-ops/columns/case-decisions/articles",
+        json={
+            "items": [
+                {"entity_type": "article", "id": second_article_id, "slug": "admin-section-second", "title": "Admin Section Second"},
+                {"entity_type": "article", "id": first_article_id, "slug": "admin-section-first", "title": "Admin Section First"},
+            ]
+        },
+    )
+    assert update_response.status_code == 200
+    assert [item["id"] for item in update_response.json()["items"]] == [second_article_id, first_article_id]
+
+    public_response = client.get("/api/columns/case-decisions/articles?page=1&page_size=5")
+    assert public_response.status_code == 200
+    public_ids = [item["id"] for item in public_response.json()["items"]]
+    assert public_ids[:2] == [second_article_id, first_article_id]
+
+    remove_response = client.put(
+        "/api/admin/content-ops/columns/case-decisions/articles",
+        json={"items": [{"entity_type": "article", "id": first_article_id, "slug": "admin-section-first", "title": "Admin Section First"}]},
+    )
+    assert remove_response.status_code == 200
+    assert [item["id"] for item in remove_response.json()["items"]] == [first_article_id]
+
+    after_remove_response = client.get("/api/columns/case-decisions/articles?page=1&page_size=5")
+    assert after_remove_response.status_code == 200
+    after_remove_ids = [item["id"] for item in after_remove_response.json()["items"]]
+    assert first_article_id in after_remove_ids
+    assert second_article_id not in after_remove_ids
+
+
+def test_admin_topic_article_collection_manages_topic_page_membership_and_order(client):
+    _ensure_topic("Admin Managed Topic", "admin-managed-topic")
+    first_article_id = _insert_article(
+        title="Admin Topic First",
+        slug="admin-topic-first",
+        publish_date="2099-06-01",
+    )
+    second_article_id = _insert_article(
+        title="Admin Topic Second",
+        slug="admin-topic-second",
+        publish_date="2099-06-02",
+    )
+
+    update_response = client.put(
+        "/api/admin/content-ops/topics/admin-managed-topic/articles",
+        json={
+            "items": [
+                {"entity_type": "article", "id": second_article_id, "slug": "admin-topic-second", "title": "Admin Topic Second"},
+                {"entity_type": "article", "id": first_article_id, "slug": "admin-topic-first", "title": "Admin Topic First"},
+            ]
+        },
+    )
+    assert update_response.status_code == 200
+    assert [item["id"] for item in update_response.json()["items"]] == [second_article_id, first_article_id]
+
+    topic_response = client.get("/api/topics/admin-managed-topic?page=1&page_size=5")
+    assert topic_response.status_code == 200
+    topic_ids = [item["id"] for item in topic_response.json()["articles"]]
+    assert topic_ids[:2] == [second_article_id, first_article_id]
+
+    remove_response = client.put(
+        "/api/admin/content-ops/topics/admin-managed-topic/articles",
+        json={"items": [{"entity_type": "article", "id": first_article_id, "slug": "admin-topic-first", "title": "Admin Topic First"}]},
+    )
+    assert remove_response.status_code == 200
+    assert [item["id"] for item in remove_response.json()["items"]] == [first_article_id]
+
+    after_remove_response = client.get("/api/topics/admin-managed-topic?page=1&page_size=5")
+    assert after_remove_response.status_code == 200
+    after_remove_ids = [item["id"] for item in after_remove_response.json()["articles"]]
+    assert first_article_id in after_remove_ids
+    assert second_article_id not in after_remove_ids
+
+
+def test_admin_column_candidates_only_return_six_public_sections(client):
+    with connection_scope() as connection:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO columns (name, slug, description, icon, sort_order, accent_color)
+            VALUES ('Legacy Column', 'legacy-column', 'Old hidden column', 'Archive', 999, '#666666')
+            """
+        )
+        connection.commit()
+
+    response = client.get("/api/admin/content-ops/candidates?entity_type=column&limit=20")
+    assert response.status_code == 200
+    slugs = [item["slug"] for item in response.json()]
+    assert "legacy-column" not in slugs
+    assert slugs == ["deans-view", "case-decisions", "industry", "insights", "research", "fudan-classroom"]
+
+
 def test_latest_and_trending_respect_new_ordering(client):
     today = date.today()
     recent_article_id = _insert_article(
@@ -599,8 +745,8 @@ def test_column_articles_endpoint_returns_english_payload_for_english_entry(clie
     assert response.status_code == 200
     payload = response.json()
 
-    assert payload["column"]["name"] == "Deep Insights"
-    assert payload["column"]["description"] == "A core column for long-form analysis, interviews, case studies, and essays."
+    assert payload["column"]["name"] == "Hot Briefing"
+    assert payload["column"]["description"] == "Business hotspots explained through data, facts, and management judgment."
     assert payload["total"] >= 1
     assert all(item["id"] != untranslated_article_id for item in payload["items"])
     assert any(item["id"] == translated_article_id for item in payload["items"])

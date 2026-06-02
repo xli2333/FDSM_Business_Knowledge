@@ -74,10 +74,12 @@ function LanguageSwitch() {
 function buildDiscoveryNavItems(isEnglish) {
   return [
     { label: isEnglish ? 'Topic Square' : '专题广场', to: '/topics' },
-    { label: isEnglish ? 'Deep Insights' : '深度洞察', to: '/column/insights' },
-    { label: isEnglish ? 'Industry Watch' : '行业观察', to: '/column/industry' },
-    { label: isEnglish ? 'Research Frontiers' : '学术前沿', to: '/column/research' },
-    { label: isEnglish ? "Dean's View" : '院长说', to: '/column/deans-view' },
+    { label: isEnglish ? 'Fudan Viewpoints' : '复旦观点', to: '/column/deans-view' },
+    { label: isEnglish ? 'Case Decisions' : '案例决策', to: '/column/case-decisions' },
+    { label: isEnglish ? 'Industry Roundtable' : '产业圆桌', to: '/column/industry' },
+    { label: isEnglish ? 'Hot Briefing' : '热点拆解', to: '/column/insights' },
+    { label: isEnglish ? 'Management Review' : '管理视野', to: '/column/research' },
+    { label: isEnglish ? 'Fudan Classroom' : '复理学堂', to: '/column/fudan-classroom' },
   ]
 }
 
@@ -157,7 +159,6 @@ function Navbar() {
   const { t, language } = useLanguage()
   const {
     authEnabled,
-    businessProfile,
     canUseAiAssistant,
     isAdmin,
     isAuthenticated,
@@ -197,14 +198,8 @@ function Navbar() {
       <div className="page-shell py-4">
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <Link to="/" className="flex min-w-0 items-center gap-4">
-              <img src="/mainpage_logo.png" alt={t('appName')} className="h-12 w-auto shrink-0" />
-              <div className="min-w-0">
-                <div className="truncate font-serif text-lg font-black text-fudan-blue sm:text-xl">{t('appName')}</div>
-                <div className="truncate text-[11px] uppercase tracking-[0.28em] text-slate-400">
-                  {isAuthenticated ? `${businessProfile?.display_name || ''} / ${membershipLabel}` : t('appSubtitle')}
-                </div>
-              </div>
+            <Link to="/" className="flex min-w-0 items-center">
+              <div className="truncate font-serif text-2xl font-black text-fudan-blue sm:text-3xl">{t('appName')}</div>
             </Link>
 
             <div className="flex flex-wrap items-center justify-end gap-2">

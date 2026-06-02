@@ -23,21 +23,29 @@ TAG_CATEGORY_LABELS = {
 }
 
 COLUMN_LOCALIZATIONS = {
-    "insights": {
-        "name": "Deep Insights",
-        "description": "A core column for long-form analysis, interviews, case studies, and essays.",
+    "deans-view": {
+        "name": "Fudan Viewpoints",
+        "description": "Key judgments from Fudan business faculty, deans, and scholars, framed for transferable business thinking.",
+    },
+    "case-decisions": {
+        "name": "Case Decisions",
+        "description": "Real business situations, key choices, decision logic, and management retrospectives.",
     },
     "industry": {
-        "name": "Industry Watch",
-        "description": "Continuous observation of industries, companies, markets, and business models.",
+        "name": "Industry Roundtable",
+        "description": "Multiple viewpoints and core disagreements around industry change, company practice, and market issues.",
+    },
+    "insights": {
+        "name": "Hot Briefing",
+        "description": "Business hotspots explained through data, facts, and management judgment.",
     },
     "research": {
-        "name": "Research Frontiers",
-        "description": "Research insight, paper decoding, and management knowledge from Fudan and related scholars.",
+        "name": "Management Review",
+        "description": "Management research, frontier theory, and practice experience translated into usable knowledge.",
     },
-    "deans-view": {
-        "name": "Dean's View",
-        "description": "Viewpoints and commentary from Fudan faculty leaders and core teaching staff.",
+    "fudan-classroom": {
+        "name": "Fudan Classroom",
+        "description": "Course programs, learning paths, alumni experience, and Fudan business teaching resources.",
     },
 }
 

@@ -18,7 +18,7 @@ function buildFollowKey(item) {
 function formatFollowType(entityType, isEnglish) {
   if (entityType === 'tag') return byLanguage(isEnglish, '标签', 'Tag')
   if (entityType === 'topic') return byLanguage(isEnglish, '专题', 'Topic')
-  return byLanguage(isEnglish, '栏目', 'Column')
+  return byLanguage(isEnglish, '板块', 'Section')
 }
 
 function MyFollowingPage() {
@@ -144,7 +144,7 @@ function MyFollowingPage() {
           <div className="section-kicker">Following</div>
           <h1 className="section-title">{byLanguage(isEnglish, '登录后查看你的关注', 'Sign in to view your follows')}</h1>
           <p className="mt-4 text-base leading-8 text-slate-600">
-            {byLanguage(isEnglish, '关注标签、专题和栏目后，这里会聚合它们的最新内容。', 'Follow tags, topics, and columns, then review them here.')}
+            {byLanguage(isEnglish, '关注标签、专题和板块后，这里会聚合它们的最新内容。', 'Follow tags, topics, and sections, then review them here.')}
           </p>
           <button
             type="button"
@@ -167,8 +167,8 @@ function MyFollowingPage() {
         <p className="mt-4 max-w-3xl text-base leading-8 text-slate-600">
           {byLanguage(
             isEnglish,
-            '左侧选择你要继续追踪的标签、专题或栏目，右侧只显示该关注对象对应的文章。删除操作独立放在卡片右上角。',
-            'Choose a followed tag, topic, or column on the left, and the right side will only show articles for that selection.',
+            '左侧选择你要继续追踪的标签、专题或板块，右侧只显示该关注对象对应的文章。删除操作独立放在卡片右上角。',
+            'Choose a followed tag, topic, or section on the left, and the right side will only show articles for that selection.',
           )}
         </p>
       </section>
@@ -226,7 +226,7 @@ function MyFollowingPage() {
               })
             ) : (
               <div className="rounded-[1.2rem] border border-dashed border-slate-300 p-5 text-sm leading-7 text-slate-500">
-                {byLanguage(isEnglish, '你还没有关注任何标签、专题或栏目。', 'You are not following any tags, topics, or columns yet.')}
+                {byLanguage(isEnglish, '你还没有关注任何标签、专题或板块。', 'You are not following any tags, topics, or sections yet.')}
               </div>
             )}
           </div>

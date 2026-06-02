@@ -22,6 +22,8 @@ const DEFAULT_TOOLBAR_STATE = {
   paragraph: true,
   heading1: false,
   heading2: false,
+  heading3: false,
+  heading4: false,
   bold: false,
   italic: false,
   underline: false,
@@ -65,21 +67,17 @@ function markdownishTextToHtml(value) {
       continue
     }
 
-    if (/^###\s+/.test(line)) {
+    if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(line)) {
       closeList()
-      blocks.push(`<h3>${escapeHtml(line.replace(/^###\s+/, ''))}</h3>`)
+      blocks.push('<hr />')
       continue
     }
 
-    if (/^##\s+/.test(line)) {
+    const heading = line.match(/^(#{1,6})\s+(.+)$/)
+    if (heading) {
       closeList()
-      blocks.push(`<h2>${escapeHtml(line.replace(/^##\s+/, ''))}</h2>`)
-      continue
-    }
-
-    if (/^#\s+/.test(line)) {
-      closeList()
-      blocks.push(`<h1>${escapeHtml(line.replace(/^#\s+/, ''))}</h1>`)
+      const level = heading[1].length
+      blocks.push(`<h${level}>${escapeHtml(heading[2].trim())}</h${level}>`)
       continue
     }
 
@@ -177,6 +175,10 @@ function buildBasicDocument(contentHtml, isEnglish) {
       h1 { font-size: 2.05rem; }
       h2 { margin-top: 34px; font-size: 1.56rem; }
       h3 { margin-top: 28px; font-size: 1.22rem; }
+      h4 { margin-top: 24px; font-size: 1.08rem; }
+      h5 { margin-top: 20px; font-size: 1rem; }
+      h6 { margin-top: 18px; font-size: 0.94rem; color: #475569; }
+      hr { margin: 28px 0; border: 0; border-top: 1px solid #d8e1ec; }
       p, li, blockquote, td, th {
         font-size: 1rem;
         line-height: 1.95;
@@ -329,6 +331,8 @@ function collectToolbarState(doc) {
     paragraph: !formatBlock || formatBlock.includes('p') || formatBlock.includes('normal'),
     heading1: formatBlock.includes('h1'),
     heading2: formatBlock.includes('h2'),
+    heading3: formatBlock.includes('h3'),
+    heading4: formatBlock.includes('h4'),
     bold: safeQueryCommandState(doc, 'bold'),
     italic: safeQueryCommandState(doc, 'italic'),
     underline: safeQueryCommandState(doc, 'underline'),
@@ -704,6 +708,22 @@ function RichPreviewEditor({
             onClick={() => runCommand('formatBlock', 'h2')}
           >
             H2
+          </ToolbarButton>
+          <ToolbarButton
+            label={isEnglish ? 'Heading 3' : '三级标题'}
+            active={toolbarState.heading3}
+            disabled={toolbarDisabled}
+            onClick={() => runCommand('formatBlock', 'h3')}
+          >
+            H3
+          </ToolbarButton>
+          <ToolbarButton
+            label={isEnglish ? 'Heading 4' : '四级标题'}
+            active={toolbarState.heading4}
+            disabled={toolbarDisabled}
+            onClick={() => runCommand('formatBlock', 'h4')}
+          >
+            H4
           </ToolbarButton>
           <ToolbarButton label={isEnglish ? 'Bold' : '加粗'} active={toolbarState.bold} disabled={toolbarDisabled} onClick={() => runCommand('bold')}>
             <Bold size={16} />

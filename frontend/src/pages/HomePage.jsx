@@ -105,7 +105,7 @@ function HomePage() {
     ? [
         ['Teaching & Research', 'Use structured articles and topics for class prep, case study, and research references.'],
         ['Executive Insight', 'Follow business topics, leadership thinking, and alumni insight in one place.'],
-        ['Member Reading', 'Extend the archive into premium columns, reports, and recurring member reading.'],
+        ['Member Reading', 'Extend the archive into premium sections, reports, and recurring member reading.'],
       ]
     : [
         ['教学与研究', '适合备课、案例检索和围绕议题的结构化阅读。'],
@@ -338,11 +338,6 @@ function HomePage() {
                   </>
                 )}
               </h1>
-              <p className="max-w-2xl text-base leading-8 text-slate-600 md:text-lg">
-                {isEnglish
-                  ? 'Built on 2,142 curated articles from the Fudan business archive, this platform brings together columns, topics, search, and AI support for structured reading.'
-                  : '基于复旦商业内容库中的 2142 篇文章，这个平台把栏目、专题、搜索和 AI 支持组织成一套连续的阅读体验。'}
-              </p>
             </div>
             <SearchBar onSearch={handleSearch} />
             {heroQuickTags.length || heroQuickTopics.length ? (
@@ -524,8 +519,8 @@ function HomePage() {
             <h2 className="section-title">{isEnglish ? 'Structured business reading in one place' : '把结构化商业阅读放在一个入口里'}</h2>
             <p className="mt-5 text-base leading-8 text-slate-600">
               {isEnglish
-                ? 'Articles, topics, columns, search, AI support, and membership access work together in one continuous reading experience.'
-                : '文章、专题、栏目、搜索、AI 支持和会员权限被组织在同一套连续阅读体验里。'}
+                ? 'Articles, topics, sections, search, AI support, and membership access work together in one continuous reading experience.'
+                : '文章、专题、板块、搜索、AI 支持和会员权限被组织在同一套连续阅读体验里。'}
             </p>
             <div className="mt-6 grid gap-4 md:grid-cols-3">
               {productCards.map(([title, desc]) => (
@@ -618,8 +613,8 @@ function HomePage() {
       <section className="page-shell mt-14">
         <div className="mb-8 flex items-end justify-between gap-4">
           <div>
-            <div className="section-kicker">{isEnglish ? 'Column Navigation' : '栏目导航'}</div>
-            <h2 className="section-title">{isEnglish ? 'Enter structured reading through columns' : '从栏目进入结构化阅读'}</h2>
+            <div className="section-kicker">{isEnglish ? 'Section Navigation' : '板块导航'}</div>
+            <h2 className="section-title">{isEnglish ? 'Enter structured reading through sections' : '从板块进入结构化阅读'}</h2>
           </div>
           <Link to="/topics" className="text-sm font-semibold tracking-[0.16em] text-fudan-orange">
             {isEnglish ? 'Browse all topics' : '查看全部专题'}
@@ -641,7 +636,7 @@ function HomePage() {
                 ))}
               </div>
               <Link to={`/column/${preview.column.slug}`} className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-fudan-orange">
-                {isEnglish ? 'Open column' : '进入栏目'}
+                {isEnglish ? 'Open section' : '进入板块'}
                 <ArrowRight size={15} />
               </Link>
             </div>

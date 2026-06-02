@@ -268,7 +268,7 @@ function SearchPage() {
               </div>
 
               <div>
-                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-400">{isEnglish ? 'Columns' : '\u680f\u76ee'}</div>
+                <div className="mb-2 text-xs uppercase tracking-[0.2em] text-slate-400">{isEnglish ? 'Sections' : '板块'}</div>
                 <div className="flex flex-wrap gap-2">
                   {columns.map((column) => (
                     <button

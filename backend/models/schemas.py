@@ -979,6 +979,16 @@ class AdminContentSectionUpdateRequest(BaseModel):
     items: list[AdminContentEntity] = Field(default_factory=list)
 
 
+class AdminArticleCollectionUpdateRequest(BaseModel):
+    items: list[AdminContentEntity] = Field(default_factory=list)
+
+
+class AdminArticleCollectionResponse(BaseModel):
+    target: AdminContentEntity
+    language: str = "zh"
+    items: list[AdminContentEntity] = Field(default_factory=list)
+
+
 class AdminTrendingConfig(BaseModel):
     default_window: str = "week"
     windows: list[str] = Field(default_factory=lambda: ["day", "week", "month"])

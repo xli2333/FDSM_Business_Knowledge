@@ -38,7 +38,7 @@ New-Item -ItemType Directory -Path $Stage -Force | Out-Null
 
 $ExcludedDirs = @(
     ".git", ".claude", ".vscode", ".idea", "__pycache__", ".pytest_cache", ".venv", "venv", "ENV",
-    "node_modules", "dist", "data", "backups", "qa", "reports", "_publish_clean",
+    "node_modules", "dist", "data", "backups", "qa", "reports", "_publish_clean", "unused_project_assets",
     "audio", "uploads", "archive", "faiss_index", "faiss_index_business", "Fudan_Business_Knowledge_Data",
     "Fudan_News_Data", "Fudan_Wechat_Data", "project_materials", "pretext", "pretext-main"
 )

@@ -45,6 +45,7 @@ qa/
 uploads/
 data/
 backups/
+handoff_packages/
 公众号排版/
 _publish_clean/
 reports/*.log

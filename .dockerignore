@@ -45,6 +45,7 @@ reports/
 _publish_clean/
 
 # Project side materials not needed by runtime images
+unused_project_assets/
 docs/
 project_materials/
 todo/

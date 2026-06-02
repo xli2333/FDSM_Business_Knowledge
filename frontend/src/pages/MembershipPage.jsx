@@ -234,7 +234,7 @@ function MembershipPage() {
           description: byLanguage(isEnglish, '沿着已关注的标签和专题继续阅读。', 'Continue through followed tags and topics.'),
         },
         {
-          label: byLanguage(isEnglish, '音频栏目', 'Audio hub'),
+          label: byLanguage(isEnglish, '音频频道', 'Audio hub'),
           path: '/audio',
           tone: 'plain',
           icon: Headphones,
@@ -420,7 +420,7 @@ function MembershipPage() {
                 className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-6 py-3 text-sm font-semibold tracking-[0.16em] text-white transition hover:bg-white/15"
               >
                 <Headphones size={16} />
-                {byLanguage(isEnglish, '音频栏目', 'Audio hub')}
+                {byLanguage(isEnglish, '音频频道', 'Audio hub')}
               </Link>
               <Link
                 to={isAdmin ? '/admin/memberships' : canUseAiAssistant ? '/chat' : '/me'}

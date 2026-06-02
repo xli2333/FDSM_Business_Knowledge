@@ -57,7 +57,6 @@ const ROLE_DATA = {
       { label: { zh: '视频', en: 'Video' }, to: '/video' },
       { label: { zh: '专题', en: 'Topics' }, to: '/topics' },
       { label: { zh: '机构', en: 'Organizations' }, to: '/organizations' },
-      { label: { zh: '时光机', en: 'Time Machine' }, to: '/time-machine' },
     ],
   },
   free_member: {
